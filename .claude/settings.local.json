@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip list *)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(git *)",
+      "Bash(where soffice *)",
+      "Bash(where libreoffice *)",
+      "Bash(python -c \"import win32com.client; print\\('win32com available'\\)\")",
+      "Bash(python -c ' *)",
+      "Bash(timeout 120 python -c ' *)",
+      "Read(//d/D/Codes/**)",
+      "Bash(python -m pytest tests/test_parsers.py -v)",
+      "Bash(python *)"
+    ]
+  }
+}
