@@ -112,4 +112,3 @@ def scan_files(
     """便捷函数：扫描目录获取文件列表"""
     scanner = FileScanner(supported_extensions=supported_extensions)
     return scanner.scan_directory(root_path)
-
