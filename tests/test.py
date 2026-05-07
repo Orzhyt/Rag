@@ -1,5 +1,6 @@
 import sys
 from common.logger import logger
+from data_pipeline import parse_directory
 from data_pipeline.scanner import FileScanner
 
 
@@ -32,7 +33,11 @@ def scanner(root_path: str):
     for ext, count in sorted(stats['by_extension'].items()):
         print(f"    {ext}: {count} 个")
 
+def parse_directory_test(path: str):
+    return parse_directory(root_path=path)
 
 if __name__ == "__main__":
-    scanner("D://Codes//Rag_Project//data//Smart-Emergency-Response//baseline//datas")
+    # scanner("D://Codes//Rag_Project//data")
+    parse_res = parse_directory_test("D://Codes//Rag_Project//data")
+
     ...
