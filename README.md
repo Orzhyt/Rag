@@ -22,6 +22,7 @@ rag_project/
 ## Modules
 
 1. **data_pipeline**: 数据加载、清洗、分割、向量化流水线
+   1. 可优化点：没有数据清洗，分割方式固定500字符（parser.py）
 2. **milvus**: Milvus向量数据库连接、索引管理
 3. **retrieval**: 语义检索、相似度匹配
 4. **agent**: 对话智能体、LLM集成
