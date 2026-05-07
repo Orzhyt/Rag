@@ -567,7 +567,7 @@ def create_default_registry() -> ParserRegistry:
     registry.register({".doc"}, DocParser())
 
     # .ppt / .pptx / .html / .rtf 等用 unstructured 兜底
-    # 注意: Windows 上 unstructured 会自动降级，如需解析这些格式请使用 Linux/Mac
+    # Windows 上 unstructured 会自动降级，如需解析这些格式请使用 Linux/Mac
     fallback_formats = {".ppt", ".pptx", ".html", ".htm", ".rtf"}
     registry.register(fallback_formats, UnstructuredParser())
 
