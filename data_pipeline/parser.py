@@ -564,7 +564,6 @@ def create_default_registry() -> ParserRegistry:
     registry.register({".xls", ".xlsx"}, ExcelParser())
     registry.register({".md"}, MarkdownParser())
     registry.register({".txt", ".json", ".csv", ".yaml", ".yml", ".xml"}, PlainTextParser())
-
     registry.register({".doc"}, DocParser())
 
     # .ppt / .pptx / .html / .rtf 等用 unstructured 兜底
