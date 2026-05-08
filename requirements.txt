@@ -6,10 +6,10 @@ uvicorn==0.24.0.post1
 pydantic==2.5.2
 python-dotenv==1.0.0
 
-# Embeddings
-sentence-transformers==2.2.2
-transformers==4.36.2
-torch==2.1.0
+# Embeddings (>=2.7 兼容新版 huggingface-hub)
+sentence-transformers>=3.3.0
+transformers>=4.48.0
+torch>=2.5.0
 
 # LLM Integration
 langchain==0.1.0

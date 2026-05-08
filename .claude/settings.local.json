@@ -11,7 +11,9 @@
       "Bash(timeout 120 python -c ' *)",
       "Read(//d/D/Codes/**)",
       "Bash(python -m pytest tests/test_parsers.py -v)",
-      "Bash(python *)"
+      "Bash(python *)",
+      "Bash(pip install *)",
+      "Bash(pip show *)"
     ]
   }
 }
