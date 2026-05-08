@@ -96,3 +96,6 @@ def test_maas_chat_stream():
 
     print(f"流式回复: {full_content}")
     assert full_content, "流式回复内容为空"
+
+if __name__ == '__main__':
+    test_maas_chat_basic()

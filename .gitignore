@@ -13,3 +13,8 @@ venv/
 .DS_Store
 .vscode/
 .idea/
+.claude/
+/models/Qwen3-Embedding-0.6B/
+/models/Qwen3-Embedding-4B/
+/models/Qwen3-Reranker-0.6B/
+/models/Qwen3-Reranker-4B/
