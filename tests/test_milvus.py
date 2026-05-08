@@ -227,3 +227,95 @@ class TestDelete:
 
     def test_delete_empty_ids(self, milvus_service):
         assert milvus_service.delete_by_chunk_ids([]) == 0
+
+
+# ============================================================================
+# Hybrid Search (向量 + BM25 + 标量过滤)
+# ============================================================================
+
+
+class TestHybridSearch:
+    def test_hybrid_search_returns_results(self, milvus_service):
+        chunks = [
+            _make_chunk("hyb_001", "人工智能是计算机科学的一个分支，致力于创建智能系统。"),
+            _make_chunk("hyb_002", "Python是一种广泛使用的编程语言，适用于数据科学。"),
+            _make_chunk("hyb_003", "向量数据库用于存储和检索高维向量，支持相似度搜索。"),
+        ]
+        milvus_service.insert(chunks)
+
+        results = milvus_service.hybrid_search("什么是人工智能", top_k=3)
+        assert len(results) > 0
+        assert results[0].score > 0
+
+    def test_hybrid_search_with_filter(self, milvus_service):
+        chunks = [
+            _make_chunk("hfl_001", "人工智能相关内容", source="/test/ai.pdf", file_name="ai.pdf"),
+            _make_chunk("hfl_002", "Python相关内容", source="/test/py.pdf", file_name="py.pdf"),
+        ]
+        milvus_service.insert(chunks)
+
+        results = milvus_service.hybrid_search(
+            "技术", top_k=10, filter_expr='file_name == "ai.pdf"'
+        )
+        assert all(r.file_name == "ai.pdf" for r in results)
+
+    def test_hybrid_search_weighted_ranker(self, milvus_service):
+        chunks = [
+            _make_chunk("hw_001", "深度学习是机器学习的一个子领域。"),
+            _make_chunk("hw_002", "自然语言处理使用深度学习技术。"),
+        ]
+        milvus_service.insert(chunks)
+
+        results_vec = milvus_service.hybrid_search(
+            "深度学习", top_k=2, vector_weight=0.9, bm25_weight=0.1
+        )
+        assert len(results_vec) > 0
+
+        results_bm25 = milvus_service.hybrid_search(
+            "深度学习", top_k=2, vector_weight=0.1, bm25_weight=0.9
+        )
+        assert len(results_bm25) > 0
+
+    def test_hybrid_search_rrf_ranker(self, milvus_service):
+        chunks = [
+            _make_chunk("hrf_001", "分布式系统设计原则包括一致性和可用性。"),
+            _make_chunk("hrf_002", "微服务架构是一种分布式系统架构风格。"),
+        ]
+        milvus_service.insert(chunks)
+
+        results = milvus_service.hybrid_search(
+            "分布式系统", top_k=2, reranker="rrf", rrf_k=60
+        )
+        assert len(results) > 0
+        assert results[0].score > 0
+
+    def test_hybrid_search_exact_keyword_match(self, milvus_service):
+        """BM25 应提升精确关键词匹配的排名"""
+        chunks = [
+            _make_chunk("kw_001", "Milvus是一个开源的向量数据库。"),
+            _make_chunk("kw_002", "数据库管理系统负责数据的存储和检索。"),
+            _make_chunk("kw_003", "开源软件促进了技术社区的发展。"),
+        ]
+        milvus_service.insert(chunks)
+
+        results = milvus_service.hybrid_search("向量数据库", top_k=3)
+        assert len(results) > 0
+        assert results[0].chunk_id == "kw_001"
+
+
+class TestCollectionBM25:
+    def test_create_collection_with_bm25(self, milvus_client, embedder):
+        milvus_client.create_collection(
+            dim=embedder.dim, drop_if_exists=True, enable_bm25=True
+        )
+        desc = milvus_client.describe_collection()
+        field_names = [f["name"] for f in desc["fields"]]
+        assert "content_sparse" in field_names
+
+    def test_create_collection_without_bm25(self, milvus_client, embedder):
+        milvus_client.create_collection(
+            dim=embedder.dim, drop_if_exists=True, enable_bm25=False
+        )
+        desc = milvus_client.describe_collection()
+        field_names = [f["name"] for f in desc["fields"]]
+        assert "content_sparse" not in field_names

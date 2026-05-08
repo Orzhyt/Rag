@@ -7,6 +7,8 @@ from pymilvus import (
     CollectionSchema,
     DataType,
     FieldSchema,
+    Function,
+    FunctionType,
     connections,
     db,
     utility,
@@ -145,6 +147,8 @@ class MilvusClient:
                 info["max_length"] = f.params.get("max_length")
             elif f.dtype == DataType.FLOAT_VECTOR:
                 info["dim"] = f.params.get("dim")
+            elif f.dtype == DataType.SPARSE_FLOAT_VECTOR:
+                info["type_detail"] = "sparse_float_vector"
             fields_info.append(info)
         return {
             "name": col_name,
@@ -152,12 +156,27 @@ class MilvusClient:
             "fields": fields_info,
         }
 
-    def create_collection(self, dim: int, drop_if_exists: bool = False) -> Collection:
+    @property
+    def has_bm25_support(self) -> bool:
+        """检查当前集合是否支持 BM25 全文检索"""
+        if not self.collection_exists():
+            return False
+        col = Collection(name=self.collection_name, using=self.alias)
+        field_names = [f.name for f in col.schema.fields]
+        return "content_sparse" in field_names
+
+    def create_collection(
+        self,
+        dim: int,
+        drop_if_exists: bool = False,
+        enable_bm25: bool = True,
+    ) -> Collection:
         """创建 Rag 集合
 
         Args:
             dim: 向量维度
             drop_if_exists: 是否先删除已存在的同名集合
+            enable_bm25: 是否启用 BM25 全文检索（需 Milvus 2.5+）
         """
         if self.collection_exists():
             if drop_if_exists:
@@ -167,9 +186,17 @@ class MilvusClient:
                 logger.info("Collection %s already exists, reusing", self.collection_name)
                 return self.get_collection()
 
+        # content 字段：启用 BM25 时需要 analyzer
+        content_field = FieldSchema(
+            name="content",
+            dtype=DataType.VARCHAR,
+            max_length=MAX_CONTENT_LENGTH,
+            **({"enable_analyzer": True, "enable_match": True} if enable_bm25 else {}),
+        )
+
         fields = [
             FieldSchema(name="chunk_id", dtype=DataType.VARCHAR, max_length=256, is_primary=True),
-            FieldSchema(name="content", dtype=DataType.VARCHAR, max_length=MAX_CONTENT_LENGTH),
+            content_field,
             FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=dim),
             FieldSchema(name="source_file", dtype=DataType.VARCHAR, max_length=512),
             FieldSchema(name="file_name", dtype=DataType.VARCHAR, max_length=256),
@@ -185,7 +212,26 @@ class MilvusClient:
             FieldSchema(name="metadata", dtype=DataType.JSON),
         ]
 
-        schema = CollectionSchema(fields, description="RAG knowledge base chunks")
+        # BM25：添加 sparse vector 字段和 Function
+        functions = []
+        if enable_bm25:
+            fields.append(
+                FieldSchema(name="content_sparse", dtype=DataType.SPARSE_FLOAT_VECTOR)
+            )
+            functions.append(
+                Function(
+                    name="content_bm25",
+                    function_type=FunctionType.BM25,
+                    input_field_names="content",
+                    output_field_names="content_sparse",
+                )
+            )
+
+        schema = CollectionSchema(
+            fields,
+            functions=functions if functions else None,
+            description="RAG knowledge base chunks",
+        )
         col = Collection(name=self.collection_name, schema=schema, using=self.alias)
 
         # 创建 IVF_FLAT 索引以支持向量搜索
@@ -195,9 +241,18 @@ class MilvusClient:
             "params": {"nlist": 128},
         }
         col.create_index(field_name="embedding", index_params=index_params)
+
+        # 创建 sparse index 以支持 BM25 全文检索
+        if enable_bm25:
+            sparse_index_params = {
+                "index_type": "SPARSE_INVERTED_INDEX",
+                "metric_type": "BM25",
+            }
+            col.create_index(field_name="content_sparse", index_params=sparse_index_params)
+
         logger.info(
-            "Collection %s created with dim=%d, index=IVF_FLAT/COSINE",
-            self.collection_name, dim,
+            "Collection %s created with dim=%d, index=IVF_FLAT/COSINE, bm25=%s",
+            self.collection_name, dim, enable_bm25,
         )
         return col
 

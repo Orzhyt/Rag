@@ -2,6 +2,8 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from pymilvus import AnnSearchRequest, RRFRanker, WeightedRanker
+
 from data_pipeline.parser import ParsedChunk
 from common.logger import setup_logger
 
@@ -54,11 +56,27 @@ class MilvusService:
     # 初始化
     # ------------------------------------------------------------------
 
-    def init_collection(self, drop_if_exists: bool = False):
-        """初始化集合：连接 Milvus、创建集合（若不存在）、加载到内存"""
+    def init_collection(self, drop_if_exists: bool = False, enable_bm25: bool = True):
+        """初始化集合：连接 Milvus、创建集合（若不存在）、加载到内存
+
+        Args:
+            drop_if_exists: 是否先删除已存在的同名集合
+            enable_bm25: 是否启用 BM25 全文检索（需 Milvus 2.5+）
+        """
         self.client.connect()
         if not self.client.collection_exists() or drop_if_exists:
-            self.client.create_collection(dim=self.embedder.dim, drop_if_exists=drop_if_exists)
+            self.client.create_collection(
+                dim=self.embedder.dim,
+                drop_if_exists=drop_if_exists,
+                enable_bm25=enable_bm25,
+            )
+        elif enable_bm25 and not self.client.has_bm25_support:
+            logger.warning(
+                "Collection '%s' exists but lacks BM25 sparse vector field. "
+                "Hybrid search will not work. Re-create with drop_if_exists=True "
+                "or set enable_bm25=False.",
+                self.client.collection_name,
+            )
         self.client.load_collection()
 
     # ------------------------------------------------------------------
@@ -148,6 +166,77 @@ class MilvusService:
             expr=filter_expr,
             output_fields=output_fields,
         )
+
+        return [SearchResult.from_hit(hit) for hit in results[0]]
+
+    def hybrid_search(
+        self,
+        query: str,
+        top_k: int = 10,
+        filter_expr: Optional[str] = None,
+        vector_weight: float = 0.7,
+        bm25_weight: float = 0.3,
+        reranker: str = "weighted",
+        rrf_k: int = 60,
+        output_fields: List[str] = None,
+    ) -> List[SearchResult]:
+        """混合搜索：向量语义 + BM25 关键词 + 标量过滤，加权融合返回 top-k
+
+        Args:
+            query: 查询文本
+            top_k: 返回结果数
+            filter_expr: Milvus 标量过滤表达式，如 'file_type == "pdf"'
+            vector_weight: 向量搜索权重（WeightedRanker 模式下生效）
+            bm25_weight: BM25 搜索权重（WeightedRanker 模式下生效）
+            reranker: 重排策略，"weighted" 或 "rrf"
+            rrf_k: RRF 的 k 参数（仅 reranker="rrf" 时生效）
+            output_fields: 要返回的标量字段，默认返回所有
+        """
+        query_vec = self.embedder.encode([query])[0]
+
+        if output_fields is None:
+            output_fields = [
+                "chunk_id", "content", "source_file", "file_name",
+                "file_type", "chunk_index", "metadata",
+            ]
+
+        dense_req = AnnSearchRequest(
+            data=[query_vec],
+            anns_field="embedding",
+            param={"metric_type": "COSINE", "params": {"nprobe": 16}},
+            limit=top_k,
+            expr=filter_expr,
+        )
+
+        sparse_req = AnnSearchRequest(
+            data=[query],
+            anns_field="content_sparse",
+            param={"metric_type": "BM25"},
+            limit=top_k,
+            expr=filter_expr,
+        )
+
+        if reranker == "rrf":
+            ranker = RRFRanker(k=rrf_k)
+        else:
+            ranker = WeightedRanker(vector_weight, bm25_weight)
+
+        col = self.client.get_collection()
+
+        try:
+            results = col.hybrid_search(
+                reqs=[dense_req, sparse_req],
+                rerank=ranker,
+                limit=top_k,
+                output_fields=output_fields,
+            )
+        except Exception as e:
+            if "content_sparse" in str(e) or "not found" in str(e).lower():
+                raise RuntimeError(
+                    "Hybrid search requires BM25 support. "
+                    "Re-create the collection with enable_bm25=True."
+                ) from e
+            raise
 
         return [SearchResult.from_hit(hit) for hit in results[0]]
 

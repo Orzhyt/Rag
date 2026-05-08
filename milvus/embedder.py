@@ -20,7 +20,7 @@ class EmbeddingModel:
     """
 
     def __init__(self, model_name: str = None, device: str = None):
-        self.model_name = model_name or os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2")
+        self.model_name = model_name or os.getenv("EMBEDDING_MODEL", "models/Qwen3-Embedding-4B")
         self.device = device or os.getenv("EMBEDDING_DEVICE", "cpu")
         self._model = None
         self._dim = None
@@ -40,7 +40,7 @@ class EmbeddingModel:
                 logger.info("Loading embedding model: %s on %s", self.model_name, self.device)
 
             self._model = SentenceTransformer(self.model_name, device=self.device)
-            self._dim = self._model.get_sentence_embedding_dimension()
+            self._dim = self._model.get_embedding_dimension()
             logger.info("Embedding model loaded, dimension: %d", self._dim)
         return self._model
 
