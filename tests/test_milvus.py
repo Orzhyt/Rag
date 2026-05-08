@@ -12,7 +12,7 @@ class TestConnection:
     def test_connect_and_disconnect(self):
         client = MilvusClient(
             host="localhost", port="19530",
-            user="cjc", password="l$Y2TOC4Y%FJsPJd",
+            user="root", password="",
         )
         assert not client.connected
         client.connect()
@@ -23,7 +23,7 @@ class TestConnection:
     def test_context_manager(self):
         with MilvusClient(
             host="localhost", port="19530",
-            user="cjc", password="l$Y2TOC4Y%FJsPJd",
+            user="root", password="",
         ) as client:
             assert client.connected
 

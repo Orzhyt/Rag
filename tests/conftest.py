@@ -4,15 +4,16 @@ import os
 os.environ.setdefault("TORCHVISION_DISABLE_EXTENSION", "1")
 
 import pytest
+from dotenv import load_dotenv
 from pymilvus import utility
 from milvus import MilvusClient, EmbeddingModel, MilvusService
 
-
+load_dotenv()
 MILVUS_HOST = "localhost"
 MILVUS_PORT = "19530"
-MILVUS_USER = "cjc"
-MILVUS_PASSWORD = "l$Y2TOC4Y%FJsPJd"
-EMBEDDING_MODEL_NAME = "models/Qwen3-Embedding-4B"
+MILVUS_USER = os.getenv("MILVUS_USER", "root")
+MILVUS_PASSWORD = os.getenv("MILVUS_PASSWORD", "")
+EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL", "")
 TEST_COLLECTION = "test_rag_chunks"
 
 
