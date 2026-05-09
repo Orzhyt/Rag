@@ -23,7 +23,8 @@
       "Bash(pip3 show *)",
       "Bash(python3 -c \"import importlib; m=importlib.import_module\\('sentence_transformers'\\); print\\(m.__file__\\)\")",
       "Bash(nvidia-smi)",
-      "Bash(pip uninstall *)"
+      "Bash(pip uninstall *)",
+      "Bash(curl *)"
     ]
   }
 }
