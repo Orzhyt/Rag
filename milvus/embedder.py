@@ -47,7 +47,7 @@ class EmbeddingModel:
     @property
     def dim(self) -> int:
         if self._dim is None:
-            _ = self.model  # trigger lazy load
+            _ = self.model
         return self._dim
 
     def encode(self, texts: List[str], batch_size: int = 32) -> List[List[float]]:

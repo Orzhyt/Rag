@@ -14,8 +14,7 @@ logger = setup_logger("milvus.service")
 
 # 单次插入最大行数
 MAX_INSERT_BATCH_SIZE = 1000
-# 向量化批大小
-EMBED_BATCH_SIZE = 32
+# 向量化批大小（由 EmbeddingModel.default_batch_size 控制）
 
 
 @dataclass
@@ -89,17 +88,22 @@ class MilvusService:
             return 0
 
         total = 0
+        failed = 0
         for i in range(0, len(chunks), MAX_INSERT_BATCH_SIZE):
             batch = chunks[i:i + MAX_INSERT_BATCH_SIZE]
-            rows = self._build_rows(batch)
-            if rows:
-                col = self.client.get_collection()
-                col.insert(rows)
-                total += len(rows)
+            try:
+                rows = self._build_rows(batch)
+                if rows:
+                    col = self.client.get_collection()
+                    col.insert(rows)
+                    total += len(rows)
+            except Exception as e:
+                failed += len(batch)
+                logger.error("Insert batch failed [%d:%d]: %s", i, i + len(batch), e)
 
         if total > 0:
             self._flush()
-            logger.info("Inserted %d chunks", total)
+        logger.info("Inserted %d chunks, failed %d", total, failed)
         return total
 
     # ------------------------------------------------------------------
@@ -112,17 +116,22 @@ class MilvusService:
             return 0
 
         total = 0
+        failed = 0
         for i in range(0, len(chunks), MAX_INSERT_BATCH_SIZE):
             batch = chunks[i:i + MAX_INSERT_BATCH_SIZE]
-            rows = self._build_rows(batch)
-            if rows:
-                col = self.client.get_collection()
-                col.upsert(rows)
-                total += len(rows)
+            try:
+                rows = self._build_rows(batch)
+                if rows:
+                    col = self.client.get_collection()
+                    col.upsert(rows)
+                    total += len(rows)
+            except Exception as e:
+                failed += len(batch)
+                logger.error("Upsert batch failed [%d:%d]: %s", i, i + len(batch), e)
 
         if total > 0:
             self._flush()
-            logger.info("Upserted %d chunks", total)
+        logger.info("Upserted %d chunks, failed %d", total, failed)
         return total
 
     # ------------------------------------------------------------------
@@ -325,7 +334,10 @@ class MilvusService:
                 )
             contents.append(c.content[:MAX_CONTENT_LENGTH])
 
-        embeddings = self.embedder.encode(contents, batch_size=EMBED_BATCH_SIZE)
+        total = len(contents)
+        logger.info("Encoding %d chunks...", total)
+        embeddings = self.embedder.encode(contents)
+        logger.info("Encoding complete: %d embeddings generated", len(embeddings))
 
         rows = []
         for chunk, embedding in zip(chunks, embeddings):
