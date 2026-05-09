@@ -94,8 +94,7 @@ class MilvusService:
             try:
                 rows = self._build_rows(batch)
                 if rows:
-                    col = self.client.get_collection()
-                    col.insert(rows)
+                    self.client.insert(rows)
                     total += len(rows)
             except Exception as e:
                 failed += len(batch)
@@ -122,8 +121,7 @@ class MilvusService:
             try:
                 rows = self._build_rows(batch)
                 if rows:
-                    col = self.client.get_collection()
-                    col.upsert(rows)
+                    self.client.upsert(rows)
                     total += len(rows)
             except Exception as e:
                 failed += len(batch)
@@ -164,12 +162,11 @@ class MilvusService:
             ]
 
         search_params = {"metric_type": "COSINE", "params": {"nprobe": 16}}
-        col = self.client.get_collection()
 
-        results = col.search(
+        results = self.client.search(
             data=[query_vec],
             anns_field="embedding",
-            param=search_params,
+            search_params=search_params,
             limit=top_k,
             offset=offset,
             expr=filter_expr,
@@ -230,10 +227,8 @@ class MilvusService:
         else:
             ranker = WeightedRanker(vector_weight, bm25_weight)
 
-        col = self.client.get_collection()
-
         try:
-            results = col.hybrid_search(
+            results = self.client.hybrid_search(
                 reqs=[dense_req, sparse_req],
                 rerank=ranker,
                 limit=top_k,
@@ -267,8 +262,7 @@ class MilvusService:
         if output_fields is None:
             output_fields = ["*"]
 
-        col = self.client.get_collection()
-        return col.query(
+        return self.client.query(
             expr=filter_expr,
             offset=offset,
             limit=limit,
@@ -277,14 +271,13 @@ class MilvusService:
 
     def count(self, filter_expr: Optional[str] = None) -> int:
         """统计 chunk 数量（不含已软删除的实体）"""
-        col = self.client.get_collection()
         expr = filter_expr or 'chunk_id != ""'
         # Milvus query 的 offset+limit 上限为 16384，需分页累加
         page_size = 16384
         total = 0
         offset = 0
         while True:
-            batch = col.query(expr=expr, limit=page_size, offset=offset, output_fields=["chunk_id"])
+            batch = self.client.query(expr=expr, limit=page_size, offset=offset, output_fields=["chunk_id"])
             total += len(batch)
             if len(batch) < page_size:
                 break
@@ -299,22 +292,20 @@ class MilvusService:
         """按 chunk_id 批量删除"""
         if not chunk_ids:
             return 0
-        col = self.client.get_collection()
         ids_str = ", ".join(f'"{cid}"' for cid in chunk_ids)
         expr = f'chunk_id in [{ids_str}]'
-        result = col.delete(expr)
+        result = self.client.delete(expr)
         self._flush()
-        deleted = result.delete_count if hasattr(result, "delete_count") else 0
+        deleted = result.get("delete_count", 0) if isinstance(result, dict) else 0
         logger.info("Deleted %d chunks by chunk_ids", deleted)
         return deleted
 
     def delete_by_source(self, source_file: str) -> int:
         """按源文件路径删除其所有 chunk"""
-        col = self.client.get_collection()
         expr = f'source_file == "{source_file}"'
-        result = col.delete(expr)
+        result = self.client.delete(expr)
         self._flush()
-        deleted = result.delete_count if hasattr(result, "delete_count") else 0
+        deleted = result.get("delete_count", 0) if isinstance(result, dict) else 0
         logger.info("Deleted %d chunks for source: %s", deleted, source_file)
         return deleted
 
@@ -363,4 +354,4 @@ class MilvusService:
 
     def _flush(self):
         """刷写集合数据"""
-        self.client.get_collection().flush()
+        self.client.flush()

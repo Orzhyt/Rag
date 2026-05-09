@@ -10,6 +10,26 @@ load_dotenv()
 logger = setup_logger("milvus.embedder")
 
 
+def _detect_device() -> str:
+    """Auto-detect best available compute device: CUDA > NPU > CPU."""
+    try:
+        import torch
+        if torch.cuda.is_available():
+            return "cuda"
+    except (ImportError, RuntimeError):
+        pass
+
+    try:
+        import torch_npu  # noqa: F401 -- registers torch.npu
+        import torch
+        if torch.npu.is_available():
+            return "npu"
+    except (ImportError, RuntimeError, AttributeError):
+        pass
+
+    return "cpu"
+
+
 class EmbeddingModel:
     """文本向量化模型，基于 sentence-transformers
 
@@ -20,14 +40,19 @@ class EmbeddingModel:
     """
 
     def __init__(self, model_name: str = None, device: str = None):
-        self.model_name = model_name or os.getenv("EMBEDDING_MODEL", "models/Qwen3-Embedding-4B")
-        self.device = device or os.getenv("EMBEDDING_DEVICE", "cpu")
+        self.model_name = model_name or os.getenv("EMBEDDING_MODEL", "models/Qwen3-Embedding-0.6B")
+        device = device or os.getenv("EMBEDDING_DEVICE", "auto")
+        if device == "auto":
+            device = _detect_device()
+            logger.info("Auto-detected embedding device: %s", device)
+        self.device = device
         self._model = None
         self._dim = None
 
     @property
     def model(self):
         if self._model is None:
+            import torch
             from sentence_transformers import SentenceTransformer
 
             local_path = Path(self.model_name)
@@ -39,9 +64,18 @@ class EmbeddingModel:
                     logger.info("Using HF mirror: %s", hf_endpoint)
                 logger.info("Loading embedding model: %s on %s", self.model_name, self.device)
 
-            self._model = SentenceTransformer(self.model_name, device=self.device)
+            model_kwargs = {}
+            if self.device in ("cuda", "npu"):
+                model_kwargs["torch_dtype"] = torch.float16
+
+            self._model = SentenceTransformer(
+                self.model_name,
+                device=self.device,
+                model_kwargs=model_kwargs if model_kwargs else None,
+            )
             self._dim = self._model.get_embedding_dimension()
-            logger.info("Embedding model loaded, dimension: %d", self._dim)
+            dtype_str = "float16" if model_kwargs.get("torch_dtype") == torch.float16 else "float32"
+            logger.info("Embedding model loaded, dimension: %d, device: %s, dtype: %s", self._dim, self.device, dtype_str)
         return self._model
 
     @property

@@ -5,7 +5,6 @@ os.environ.setdefault("TORCHVISION_DISABLE_EXTENSION", "1")
 
 import pytest
 from dotenv import load_dotenv
-from pymilvus import utility
 from milvus import MilvusClient, EmbeddingModel, MilvusService
 
 load_dotenv()
@@ -37,7 +36,7 @@ def milvus_client():
     yield client
     # 清理：删除测试集合（如果存在）
     if client.has_collection(TEST_COLLECTION):
-        utility.drop_collection(TEST_COLLECTION, using=client.alias)
+        client.drop_collection()
     client.disconnect()
 
 

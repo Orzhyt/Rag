@@ -21,7 +21,9 @@
       "WebFetch(domain:sbert.net)",
       "Bash(nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader)",
       "Bash(pip3 show *)",
-      "Bash(python3 -c \"import importlib; m=importlib.import_module\\('sentence_transformers'\\); print\\(m.__file__\\)\")"
+      "Bash(python3 -c \"import importlib; m=importlib.import_module\\('sentence_transformers'\\); print\\(m.__file__\\)\")",
+      "Bash(nvidia-smi)",
+      "Bash(pip uninstall *)"
     ]
   }
 }
