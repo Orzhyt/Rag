@@ -147,6 +147,7 @@ class SearchRequest(BaseModel):
     filter_expr: Optional[str] = None
     offset: int = Field(0, ge=0)
     output_fields: Optional[List[str]] = None
+    collection_names: Optional[List[str]] = Field(None, description="要检索的集合列表，不提供则使用默认集合")
 
 
 class HybridSearchRequest(BaseModel):
@@ -158,6 +159,7 @@ class HybridSearchRequest(BaseModel):
     reranker: str = Field("weighted", pattern=r"^(weighted|rrf)$")
     rrf_k: int = Field(60, gt=0)
     output_fields: Optional[List[str]] = None
+    collection_names: Optional[List[str]] = Field(None, description="要检索的集合列表，不提供则使用默认集合")
 
 
 class QueryRequest(BaseModel):
@@ -165,6 +167,7 @@ class QueryRequest(BaseModel):
     limit: int = Field(100, gt=0)
     offset: int = Field(0, ge=0)
     output_fields: Optional[List[str]] = None
+    collection_names: Optional[List[str]] = Field(None, description="要查询的集合列表，不提供则使用默认集合")
 
 
 class CountRequest(BaseModel):
@@ -190,6 +193,7 @@ class SearchResultItem(BaseModel):
     file_name: str
     file_type: str
     chunk_index: int
+    collection_name: str = ""
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 

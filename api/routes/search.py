@@ -28,6 +28,7 @@ def _to_item(r: SearchResult) -> SearchResultItem:
         file_name=r.file_name,
         file_type=r.file_type,
         chunk_index=r.chunk_index,
+        collection_name=r.collection_name,
         metadata=r.metadata,
     )
 
@@ -43,6 +44,7 @@ def vector_search(
         filter_expr=req.filter_expr,
         offset=req.offset,
         output_fields=req.output_fields,
+        collection_names=req.collection_names,
     )
     items = [_to_item(r) for r in results]
     return SearchResponse(results=items, total=len(items))
@@ -62,6 +64,7 @@ def hybrid_search(
         reranker=req.reranker,
         rrf_k=req.rrf_k,
         output_fields=req.output_fields,
+        collection_names=req.collection_names,
     )
     items = [_to_item(r) for r in results]
     return SearchResponse(results=items, total=len(items))
@@ -77,6 +80,7 @@ def query(
         limit=req.limit,
         offset=req.offset,
         output_fields=req.output_fields,
+        collection_names=req.collection_names,
     )
     return QueryResponse(results=results, total=len(results))
 

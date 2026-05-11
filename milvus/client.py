@@ -393,10 +393,11 @@ class MilvusClient:
         expr: Optional[str] = None,
         output_fields: Optional[List[str]] = None,
         offset: int = 0,
+        collection_name: Optional[str] = None,
     ):
         """向量搜索"""
         return self._client.search(
-            collection_name=self.collection_name,
+            collection_name=collection_name or self.collection_name,
             data=data,
             anns_field=anns_field,
             search_params=search_params,
@@ -412,10 +413,11 @@ class MilvusClient:
         rerank,
         limit: int,
         output_fields: Optional[List[str]] = None,
+        collection_name: Optional[str] = None,
     ):
         """混合搜索"""
         return self._client.hybrid_search(
-            collection_name=self.collection_name,
+            collection_name=collection_name or self.collection_name,
             reqs=reqs,
             ranker=rerank,
             limit=limit,
@@ -428,10 +430,11 @@ class MilvusClient:
         limit: int = 100,
         offset: int = 0,
         output_fields: Optional[List[str]] = None,
+        collection_name: Optional[str] = None,
     ):
         """标量查询"""
         return self._client.query(
-            collection_name=self.collection_name,
+            collection_name=collection_name or self.collection_name,
             filter=expr,
             limit=limit,
             offset=offset,

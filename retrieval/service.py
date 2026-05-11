@@ -27,10 +27,11 @@ class SearchResult:
     file_name: str
     file_type: str
     chunk_index: int
+    collection_name: str = ""
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_hit(cls, hit) -> "SearchResult":
+    def from_hit(cls, hit, collection_name: str = "") -> "SearchResult":
         entity = hit.entity
         return cls(
             chunk_id=entity.get("chunk_id") or "",
@@ -40,6 +41,7 @@ class SearchResult:
             file_name=entity.get("file_name") or "",
             file_type=entity.get("file_type") or "",
             chunk_index=entity.get("chunk_index") or 0,
+            collection_name=collection_name,
             metadata=entity.get("metadata") or {},
         )
 
@@ -168,16 +170,21 @@ class MilvusService:
         filter_expr: Optional[str] = None,
         offset: int = 0,
         output_fields: List[str] = None,
+        collection_names: Optional[List[str]] = None,
     ) -> List[SearchResult]:
         """向量相似度搜索
 
         Args:
             query: 查询文本
-            top_k: 返回结果数
+            top_k: 每个集合返回结果数
             filter_expr: Milvus 标量过滤表达式，如 'file_type == "pdf"'
             offset: 分页偏移
             output_fields: 要返回的标量字段，默认返回所有
+            collection_names: 要检索的集合列表，None 则使用默认集合
         """
+        if collection_names is None:
+            collection_names = [self.client.collection_name]
+
         query_vec = self.embedder.encode([query])[0]
 
         if output_fields is None:
@@ -188,17 +195,24 @@ class MilvusService:
 
         search_params = {"metric_type": "COSINE", "params": {"nprobe": 16}}
 
-        results = self.client.search(
-            data=[query_vec],
-            anns_field="embedding",
-            search_params=search_params,
-            limit=top_k,
-            offset=offset,
-            expr=filter_expr,
-            output_fields=output_fields,
-        )
+        all_results = []
+        for col_name in collection_names:
+            results = self.client.search(
+                data=[query_vec],
+                anns_field="embedding",
+                search_params=search_params,
+                limit=top_k,
+                offset=offset,
+                expr=filter_expr,
+                output_fields=output_fields,
+                collection_name=col_name,
+            )
+            all_results.extend(
+                SearchResult.from_hit(hit, collection_name=col_name)
+                for hit in results[0]
+            )
 
-        return [SearchResult.from_hit(hit) for hit in results[0]]
+        return all_results
 
     def hybrid_search(
         self,
@@ -210,19 +224,24 @@ class MilvusService:
         reranker: str = "weighted",
         rrf_k: int = 60,
         output_fields: List[str] = None,
+        collection_names: Optional[List[str]] = None,
     ) -> List[SearchResult]:
         """混合搜索：向量语义 + BM25 关键词 + 标量过滤，加权融合返回 top-k
 
         Args:
             query: 查询文本
-            top_k: 返回结果数
+            top_k: 每个集合返回结果数
             filter_expr: Milvus 标量过滤表达式，如 'file_type == "pdf"'
             vector_weight: 向量搜索权重（WeightedRanker 模式下生效）
             bm25_weight: BM25 搜索权重（WeightedRanker 模式下生效）
             reranker: 重排策略，"weighted" 或 "rrf"
             rrf_k: RRF 的 k 参数（仅 reranker="rrf" 时生效）
             output_fields: 要返回的标量字段，默认返回所有
+            collection_names: 要检索的集合列表，None 则使用默认集合
         """
+        if collection_names is None:
+            collection_names = [self.client.collection_name]
+
         query_vec = self.embedder.encode([query])[0]
 
         if output_fields is None:
@@ -252,22 +271,29 @@ class MilvusService:
         else:
             ranker = WeightedRanker(vector_weight, bm25_weight)
 
-        try:
-            results = self.client.hybrid_search(
-                reqs=[dense_req, sparse_req],
-                rerank=ranker,
-                limit=top_k,
-                output_fields=output_fields,
+        all_results = []
+        for col_name in collection_names:
+            try:
+                results = self.client.hybrid_search(
+                    reqs=[dense_req, sparse_req],
+                    rerank=ranker,
+                    limit=top_k,
+                    output_fields=output_fields,
+                    collection_name=col_name,
+                )
+            except Exception as e:
+                if "content_sparse" in str(e) or "not found" in str(e).lower():
+                    raise RuntimeError(
+                        "Hybrid search requires BM25 support. "
+                        "Re-create the collection with enable_bm25=True."
+                    ) from e
+                raise
+            all_results.extend(
+                SearchResult.from_hit(hit, collection_name=col_name)
+                for hit in results[0]
             )
-        except Exception as e:
-            if "content_sparse" in str(e) or "not found" in str(e).lower():
-                raise RuntimeError(
-                    "Hybrid search requires BM25 support. "
-                    "Re-create the collection with enable_bm25=True."
-                ) from e
-            raise
 
-        return [SearchResult.from_hit(hit) for hit in results[0]]
+        return all_results
 
     def query(
         self,
@@ -275,24 +301,37 @@ class MilvusService:
         limit: int = 100,
         offset: int = 0,
         output_fields: List[str] = None,
+        collection_names: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """标量查询（无向量搜索）
 
         Args:
             filter_expr: Milvus 过滤表达式，如 'file_type == "pdf"'
-            limit: 返回数量上限
+            limit: 每个集合返回数量上限
             offset: 分页偏移
             output_fields: 要返回的字段，默认返回所有标量字段
+            collection_names: 要查询的集合列表，None 则使用默认集合
         """
+        if collection_names is None:
+            collection_names = [self.client.collection_name]
+
         if output_fields is None:
             output_fields = ["*"]
 
-        return self.client.query(
-            expr=filter_expr,
-            offset=offset,
-            limit=limit,
-            output_fields=output_fields,
-        )
+        all_results = []
+        for col_name in collection_names:
+            batch = self.client.query(
+                expr=filter_expr,
+                offset=offset,
+                limit=limit,
+                output_fields=output_fields,
+                collection_name=col_name,
+            )
+            for row in batch:
+                row["collection_name"] = col_name
+            all_results.extend(batch)
+
+        return all_results
 
     def count(self, filter_expr: Optional[str] = None) -> int:
         """统计 chunk 数量（不含已软删除的实体）"""
