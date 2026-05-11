@@ -20,6 +20,85 @@ logger = setup_logger("milvus.client")
 # content 字段最大长度
 MAX_CONTENT_LENGTH = 16384
 
+# DataType 字符串 → 枚举映射
+_DTYPE_MAP = {
+    "BOOL": DataType.BOOL,
+    "INT8": DataType.INT8,
+    "INT16": DataType.INT16,
+    "INT32": DataType.INT32,
+    "INT64": DataType.INT64,
+    "FLOAT": DataType.FLOAT,
+    "DOUBLE": DataType.DOUBLE,
+    "VARCHAR": DataType.VARCHAR,
+    "JSON": DataType.JSON,
+    "FLOAT_VECTOR": DataType.FLOAT_VECTOR,
+    "SPARSE_FLOAT_VECTOR": DataType.SPARSE_FLOAT_VECTOR,
+    "ARRAY": DataType.ARRAY,
+}
+
+
+def build_field_schema(fd: "FieldDefinition", dim: Optional[int] = None) -> FieldSchema:
+    """将 API FieldDefinition 转为 pymilvus FieldSchema"""
+    dtype = _DTYPE_MAP[fd.dtype]
+    kwargs: Dict[str, Any] = {
+        "name": fd.name,
+        "dtype": dtype,
+        "description": fd.description,
+        "is_primary": fd.is_primary,
+    }
+    if fd.auto_id:
+        kwargs["auto_id"] = True
+
+    if dtype == DataType.VARCHAR:
+        kwargs["max_length"] = fd.max_length if fd.max_length is not None else 256
+        if fd.enable_analyzer is not None:
+            kwargs["enable_analyzer"] = fd.enable_analyzer
+        if fd.enable_match is not None:
+            kwargs["enable_match"] = fd.enable_match
+    elif dtype == DataType.FLOAT_VECTOR:
+        effective_dim = fd.dim if fd.dim is not None else dim
+        if effective_dim is None:
+            raise ValueError(
+                f"Field '{fd.name}' is FLOAT_VECTOR but no dim provided. "
+                "Set dim on the field or provide dim in the request."
+            )
+        kwargs["dim"] = effective_dim
+    elif dtype == DataType.ARRAY:
+        if fd.element_type is None:
+            raise ValueError(f"Field '{fd.name}' is ARRAY but element_type not provided")
+        kwargs["element_type"] = _DTYPE_MAP[fd.element_type]
+        if fd.max_capacity is not None:
+            kwargs["max_capacity"] = fd.max_capacity
+
+    return FieldSchema(**kwargs)
+
+
+def build_default_rag_fields(dim: int, enable_bm25: bool) -> List[FieldSchema]:
+    """构建默认 RAG chunk 字段列表"""
+    content_field = FieldSchema(
+        name="content",
+        dtype=DataType.VARCHAR,
+        max_length=MAX_CONTENT_LENGTH,
+        **({"enable_analyzer": True, "enable_match": True} if enable_bm25 else {}),
+    )
+    return [
+        FieldSchema(name="chunk_id", dtype=DataType.VARCHAR, max_length=256, is_primary=True),
+        content_field,
+        FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=dim),
+        FieldSchema(name="source_file", dtype=DataType.VARCHAR, max_length=512),
+        FieldSchema(name="file_name", dtype=DataType.VARCHAR, max_length=256),
+        FieldSchema(name="file_type", dtype=DataType.VARCHAR, max_length=50),
+        FieldSchema(name="chunk_index", dtype=DataType.INT64),
+        FieldSchema(name="total_chunks", dtype=DataType.INT64),
+        FieldSchema(name="page_number", dtype=DataType.INT64),
+        FieldSchema(name="sheet_name", dtype=DataType.VARCHAR, max_length=256),
+        FieldSchema(name="title", dtype=DataType.VARCHAR, max_length=512),
+        FieldSchema(name="file_size", dtype=DataType.INT64),
+        FieldSchema(name="created_at", dtype=DataType.VARCHAR, max_length=64),
+        FieldSchema(name="modified_at", dtype=DataType.VARCHAR, max_length=64),
+        FieldSchema(name="metadata", dtype=DataType.JSON),
+    ]
+
 
 class MilvusClient:
     """Milvus 连接管理与集合操作（基于 PyMilvus MilvusClient 新 API）"""
@@ -149,114 +228,132 @@ class MilvusClient:
 
     @property
     def has_bm25_support(self) -> bool:
-        """检查当前集合是否支持 BM25 全文检索"""
+        """检查当前集合是否支持 BM25 全文检索（检测任意 SPARSE_FLOAT_VECTOR 字段）"""
         if not self.collection_exists():
             return False
         info = self._client.describe_collection(self.collection_name)
-        field_names = [f["name"] for f in info.get("fields", [])]
-        return "content_sparse" in field_names
+        for f in info.get("fields", []):
+            if f.get("type") == DataType.SPARSE_FLOAT_VECTOR:
+                return True
+        return False
 
     def create_collection(
         self,
         dim: int,
         drop_if_exists: bool = False,
         enable_bm25: bool = True,
+        collection_name: Optional[str] = None,
+        fields: Optional[List[FieldSchema]] = None,
+        vector_index: Optional[Dict[str, Any]] = None,
+        bm25_config: Optional[Dict[str, Any]] = None,
+        description: Optional[str] = None,
+        embedding_field_name: Optional[str] = None,
     ):
-        """创建 Rag 集合
+        """创建集合
 
         Args:
             dim: 向量维度
             drop_if_exists: 是否先删除已存在的同名集合
             enable_bm25: 是否启用 BM25 全文检索（需 Milvus 2.5+）
+            collection_name: 自定义集合名称，None 则使用 self.collection_name
+            fields: 自定义字段列表（List[FieldSchema]），None 则使用默认 RAG 字段
+            vector_index: 向量索引参数 dict，键: field_name, index_type, metric_type, params
+            bm25_config: BM25 配置 dict，键: text_field_name, sparse_field_name, function_name
+            description: 集合 schema 描述
+            embedding_field_name: 嵌入向量字段名，用于创建索引
         """
-        if self.collection_exists():
+        col_name = collection_name or self.collection_name
+
+        if self._client.has_collection(col_name):
             if drop_if_exists:
-                logger.info("Dropping existing collection: %s", self.collection_name)
-                self._client.drop_collection(self.collection_name)
+                logger.info("Dropping existing collection: %s", col_name)
+                self._client.drop_collection(col_name)
             else:
-                logger.info("Collection %s already exists, reusing", self.collection_name)
+                logger.info("Collection %s already exists, reusing", col_name)
                 return
 
-        # content 字段：启用 BM25 时需要 analyzer
-        content_field = FieldSchema(
-            name="content",
-            dtype=DataType.VARCHAR,
-            max_length=MAX_CONTENT_LENGTH,
-            **({"enable_analyzer": True, "enable_match": True} if enable_bm25 else {}),
-        )
+        # 构建字段列表
+        use_default_fields = fields is None
+        if use_default_fields:
+            field_list = build_default_rag_fields(dim, enable_bm25)
+        else:
+            field_list = list(fields)
 
-        fields = [
-            FieldSchema(name="chunk_id", dtype=DataType.VARCHAR, max_length=256, is_primary=True),
-            content_field,
-            FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=dim),
-            FieldSchema(name="source_file", dtype=DataType.VARCHAR, max_length=512),
-            FieldSchema(name="file_name", dtype=DataType.VARCHAR, max_length=256),
-            FieldSchema(name="file_type", dtype=DataType.VARCHAR, max_length=50),
-            FieldSchema(name="chunk_index", dtype=DataType.INT64),
-            FieldSchema(name="total_chunks", dtype=DataType.INT64),
-            FieldSchema(name="page_number", dtype=DataType.INT64),
-            FieldSchema(name="sheet_name", dtype=DataType.VARCHAR, max_length=256),
-            FieldSchema(name="title", dtype=DataType.VARCHAR, max_length=512),
-            FieldSchema(name="file_size", dtype=DataType.INT64),
-            FieldSchema(name="created_at", dtype=DataType.VARCHAR, max_length=64),
-            FieldSchema(name="modified_at", dtype=DataType.VARCHAR, max_length=64),
-            FieldSchema(name="metadata", dtype=DataType.JSON),
-        ]
-
-        # BM25：添加 sparse vector 字段和 Function
+        # BM25 处理
         functions = []
         if enable_bm25:
-            fields.append(
-                FieldSchema(name="content_sparse", dtype=DataType.SPARSE_FLOAT_VECTOR)
+            text_field = (bm25_config or {}).get("text_field_name", "content")
+            sparse_field = (bm25_config or {}).get("sparse_field_name", "content_sparse")
+            func_name = (bm25_config or {}).get("function_name", "content_bm25")
+
+            # 自定义字段时校验 text_field
+            if not use_default_fields:
+                field_names = [f.name for f in field_list]
+                if sparse_field in field_names:
+                    raise ValueError(
+                        f"Sparse field '{sparse_field}' already exists in fields. "
+                        "Remove it from your fields list; it will be auto-created."
+                    )
+                text_schema = next((f for f in field_list if f.name == text_field), None)
+                if text_schema is None:
+                    raise ValueError(
+                        f"BM25 text_field '{text_field}' not found in custom fields. "
+                        "Add it or change bm25_config.text_field_name."
+                    )
+                if text_schema.dtype != DataType.VARCHAR:
+                    raise ValueError(
+                        f"BM25 text_field '{text_field}' must be VARCHAR, got {text_schema.dtype.name}"
+                    )
+
+            field_list.append(
+                FieldSchema(name=sparse_field, dtype=DataType.SPARSE_FLOAT_VECTOR)
             )
             functions.append(
                 Function(
-                    name="content_bm25",
+                    name=func_name,
                     function_type=FunctionType.BM25,
-                    input_field_names="content",
-                    output_field_names="content_sparse",
+                    input_field_names=text_field,
+                    output_field_names=sparse_field,
                 )
             )
 
         schema = CollectionSchema(
-            fields,
+            field_list,
             functions=functions if functions else None,
-            description="RAG knowledge base chunks",
+            description=description or "RAG knowledge base chunks",
         )
-        self._client.create_collection(
-            collection_name=self.collection_name,
-            schema=schema,
-        )
+        self._client.create_collection(collection_name=col_name, schema=schema)
 
-        # 创建 IVF_FLAT 索引以支持向量搜索
+        # 创建向量索引
+        vi = vector_index or {}
+        emb_field = embedding_field_name or vi.get("field_name") or "embedding"
+        idx_type = vi.get("index_type", "IVF_FLAT")
+        metric = vi.get("metric_type", "COSINE")
+        idx_params = vi.get("params", {"nlist": 128})
+
         index_params = IndexParams()
         index_params.add_index(
-            field_name="embedding",
-            index_type="IVF_FLAT",
-            metric_type="COSINE",
-            nlist=128,
+            field_name=emb_field,
+            index_type=idx_type,
+            metric_type=metric,
+            **idx_params,
         )
-        self._client.create_index(
-            collection_name=self.collection_name,
-            index_params=index_params,
-        )
+        self._client.create_index(collection_name=col_name, index_params=index_params)
 
-        # 创建 sparse index 以支持 BM25 全文检索
+        # BM25 sparse 索引
         if enable_bm25:
+            sparse_field = (bm25_config or {}).get("sparse_field_name", "content_sparse")
             sparse_index_params = IndexParams()
             sparse_index_params.add_index(
-                field_name="content_sparse",
+                field_name=sparse_field,
                 index_type="SPARSE_INVERTED_INDEX",
                 metric_type="BM25",
             )
-            self._client.create_index(
-                collection_name=self.collection_name,
-                index_params=sparse_index_params,
-            )
+            self._client.create_index(collection_name=col_name, index_params=sparse_index_params)
 
         logger.info(
-            "Collection %s created with dim=%d, index=IVF_FLAT/COSINE, bm25=%s",
-            self.collection_name, dim, enable_bm25,
+            "Collection %s created with dim=%d, index=%s/%s, bm25=%s",
+            col_name, dim, idx_type, metric, enable_bm25,
         )
 
     def drop_collection(self):

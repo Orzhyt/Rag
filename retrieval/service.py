@@ -2,13 +2,13 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from pymilvus import AnnSearchRequest, RRFRanker, WeightedRanker
+from pymilvus import AnnSearchRequest, FieldSchema, RRFRanker, WeightedRanker
 
 from data_pipeline.parser import ParsedChunk
 from common.logger import setup_logger
 
-from .client import MAX_CONTENT_LENGTH, MilvusClient
-from .embedder import EmbeddingModel
+from milvus.client import MAX_CONTENT_LENGTH, MilvusClient
+from milvus.embedder import EmbeddingModel
 
 logger = setup_logger("milvus.service")
 
@@ -55,19 +55,44 @@ class MilvusService:
     # 初始化
     # ------------------------------------------------------------------
 
-    def init_collection(self, drop_if_exists: bool = False, enable_bm25: bool = True):
+    def init_collection(
+        self,
+        drop_if_exists: bool = False,
+        enable_bm25: bool = True,
+        collection_name: Optional[str] = None,
+        fields: Optional[List[FieldSchema]] = None,
+        vector_index: Optional[Dict[str, Any]] = None,
+        bm25_config: Optional[Dict[str, Any]] = None,
+        description: Optional[str] = None,
+        embedding_field_name: Optional[str] = None,
+    ):
         """初始化集合：连接 Milvus、创建集合（若不存在）、加载到内存
 
         Args:
             drop_if_exists: 是否先删除已存在的同名集合
             enable_bm25: 是否启用 BM25 全文检索（需 Milvus 2.5+）
+            collection_name: 自定义集合名称
+            fields: 自定义字段列表
+            vector_index: 向量索引参数
+            bm25_config: BM25 配置
+            description: 集合 schema 描述
+            embedding_field_name: 嵌入向量字段名
         """
         self.client.connect()
-        if not self.client.collection_exists() or drop_if_exists:
+        if collection_name is not None:
+            self.client.collection_name = collection_name
+        effective_name = self.client.collection_name
+        if not self.client.has_collection(effective_name) or drop_if_exists:
             self.client.create_collection(
                 dim=self.embedder.dim,
                 drop_if_exists=drop_if_exists,
                 enable_bm25=enable_bm25,
+                collection_name=collection_name,
+                fields=fields,
+                vector_index=vector_index,
+                bm25_config=bm25_config,
+                description=description,
+                embedding_field_name=embedding_field_name,
             )
         elif enable_bm25 and not self.client.has_bm25_support:
             logger.warning(

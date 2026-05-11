@@ -6,7 +6,7 @@ from api.deps import get_milvus_service
 from api.schemas import IngestRequest, IngestResponse
 from common.logger import setup_logger
 from data_pipeline import parse_directory
-from milvus.service import MilvusService
+from retrieval.service import MilvusService
 
 logger = setup_logger("api.ingestion")
 router = APIRouter()
@@ -24,6 +24,7 @@ def ingest_directory(
     service.init_collection(
         drop_if_exists=req.drop_if_exists,
         enable_bm25=req.enable_bm25,
+        collection_name=req.collection_name,
     )
 
     chunks = parse_directory(

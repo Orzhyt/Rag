@@ -3,7 +3,7 @@ from typing import Optional
 from common.logger import setup_logger
 from milvus.client import MilvusClient
 from milvus.embedder import EmbeddingModel
-from milvus.service import MilvusService
+from retrieval.service import MilvusService
 
 logger = setup_logger("api.deps")
 

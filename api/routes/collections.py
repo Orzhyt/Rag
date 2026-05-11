@@ -11,9 +11,9 @@ from api.schemas import (
     InitCollectionRequest,
     MessageResponse,
 )
-from milvus.client import MilvusClient
+from milvus.client import MilvusClient, build_field_schema
 from milvus.embedder import EmbeddingModel
-from milvus.service import MilvusService
+from retrieval.service import MilvusService
 
 router = APIRouter()
 
@@ -54,12 +54,42 @@ def create_collection(
     embedder: EmbeddingModel = Depends(get_embedder),
 ):
     dim = req.dim if req.dim is not None else embedder.dim
+
+    field_schemas = None
+    if req.fields is not None:
+        field_schemas = [build_field_schema(fd, dim=dim) for fd in req.fields]
+
+    vector_index = None
+    if req.vector_index is not None:
+        vector_index = {
+            "field_name": req.vector_index.field_name,
+            "index_type": req.vector_index.index_type,
+            "metric_type": req.vector_index.metric_type,
+            "params": req.vector_index.params,
+        }
+
+    bm25_config = None
+    if req.bm25_config is not None:
+        bm25_config = {
+            "text_field_name": req.bm25_config.text_field_name,
+            "sparse_field_name": req.bm25_config.sparse_field_name,
+            "function_name": req.bm25_config.function_name,
+        }
+
     client.create_collection(
         dim=dim,
         drop_if_exists=req.drop_if_exists,
         enable_bm25=req.enable_bm25,
+        collection_name=req.collection_name,
+        fields=field_schemas,
+        vector_index=vector_index,
+        bm25_config=bm25_config,
+        description=req.description,
+        embedding_field_name=req.embedding_field_name,
     )
-    return MessageResponse(message=f"Collection '{client.collection_name}' created (dim={dim})")
+
+    effective_name = req.collection_name or client.collection_name
+    return MessageResponse(message=f"Collection '{effective_name}' created (dim={dim})")
 
 
 @router.post("/init", response_model=MessageResponse)
@@ -67,11 +97,40 @@ def init_collection(
     req: InitCollectionRequest,
     service: MilvusService = Depends(get_milvus_service),
 ):
+    field_schemas = None
+    if req.fields is not None:
+        field_schemas = [build_field_schema(fd) for fd in req.fields]
+
+    vector_index = None
+    if req.vector_index is not None:
+        vector_index = {
+            "field_name": req.vector_index.field_name,
+            "index_type": req.vector_index.index_type,
+            "metric_type": req.vector_index.metric_type,
+            "params": req.vector_index.params,
+        }
+
+    bm25_config = None
+    if req.bm25_config is not None:
+        bm25_config = {
+            "text_field_name": req.bm25_config.text_field_name,
+            "sparse_field_name": req.bm25_config.sparse_field_name,
+            "function_name": req.bm25_config.function_name,
+        }
+
     service.init_collection(
         drop_if_exists=req.drop_if_exists,
         enable_bm25=req.enable_bm25,
+        collection_name=req.collection_name,
+        fields=field_schemas,
+        vector_index=vector_index,
+        bm25_config=bm25_config,
+        description=req.description,
+        embedding_field_name=req.embedding_field_name,
     )
-    return MessageResponse(message=f"Collection '{service.client.collection_name}' initialized")
+
+    effective_name = req.collection_name or service.client.collection_name
+    return MessageResponse(message=f"Collection '{effective_name}' initialized")
 
 
 @router.delete("/drop", response_model=MessageResponse)

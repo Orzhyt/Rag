@@ -14,7 +14,7 @@ from api.schemas import (
     SearchResponse,
     SearchResultItem,
 )
-from milvus.service import MilvusService, SearchResult
+from retrieval.service import MilvusService, SearchResult
 
 router = APIRouter()
 
