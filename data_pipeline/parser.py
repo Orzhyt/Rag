@@ -54,24 +54,6 @@ class ParsedChunk:
     modified_at: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
 
-    def to_milvus_dict(self) -> Dict[str, Any]:
-        """转为可直接插入 Milvus 的字典"""
-        return {
-            "chunk_id": self.chunk_id,
-            "content": self.content,
-            "source_file": self.source_file,
-            "file_name": self.file_name,
-            "file_type": self.file_type,
-            "chunk_index": self.chunk_index,
-            "total_chunks": self.total_chunks,
-            "page_number": self.page_number,
-            "sheet_name": self.sheet_name,
-            "title": self.title,
-            "file_size": self.file_size,
-            "created_at": self.created_at,
-            "modified_at": self.modified_at,
-            "metadata": self.metadata,
-        }
 
 
 # ============================================================================
@@ -591,7 +573,7 @@ class DocumentParser:
         chunks = parser.parse_files(files)
 
         for chunk in chunks:
-            print(chunk.to_milvus_dict())
+            print(chunk)
     """
 
     def __init__(
@@ -674,10 +656,13 @@ class DocumentParser:
     def _get_file_stat(self, file_path: str) -> Dict[str, Any]:
         try:
             stat = os.stat(file_path)
+            # 两个时间都用 st_mtime：Windows 上 st_ctime 是文件系统创建时间，
+            # 复制文件时会变成复制时间（晚于修改时间），不符合直觉。
+            mtime = datetime.fromtimestamp(stat.st_mtime).isoformat()
             return {
                 "size": stat.st_size,
-                "created_at": datetime.fromtimestamp(stat.st_ctime).isoformat(),
-                "modified_at": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                "created_at": mtime,
+                "modified_at": mtime,
             }
         except OSError:
             return {}

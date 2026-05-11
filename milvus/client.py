@@ -12,6 +12,7 @@ from pymilvus import (
 )
 from pymilvus.milvus_client.index import IndexParams
 
+from api.schemas import FieldDefinition
 from common.logger import setup_logger
 
 load_dotenv()
@@ -74,30 +75,30 @@ def build_field_schema(fd: "FieldDefinition", dim: Optional[int] = None) -> Fiel
 
 
 def build_default_rag_fields(dim: int, enable_bm25: bool) -> List[FieldSchema]:
-    """构建默认 RAG chunk 字段列表"""
-    content_field = FieldSchema(
-        name="content",
-        dtype=DataType.VARCHAR,
-        max_length=MAX_CONTENT_LENGTH,
-        **({"enable_analyzer": True, "enable_match": True} if enable_bm25 else {}),
-    )
-    return [
-        FieldSchema(name="chunk_id", dtype=DataType.VARCHAR, max_length=256, is_primary=True),
-        content_field,
-        FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=dim),
-        FieldSchema(name="source_file", dtype=DataType.VARCHAR, max_length=512),
-        FieldSchema(name="file_name", dtype=DataType.VARCHAR, max_length=256),
-        FieldSchema(name="file_type", dtype=DataType.VARCHAR, max_length=50),
-        FieldSchema(name="chunk_index", dtype=DataType.INT64),
-        FieldSchema(name="total_chunks", dtype=DataType.INT64),
-        FieldSchema(name="page_number", dtype=DataType.INT64),
-        FieldSchema(name="sheet_name", dtype=DataType.VARCHAR, max_length=256),
-        FieldSchema(name="title", dtype=DataType.VARCHAR, max_length=512),
-        FieldSchema(name="file_size", dtype=DataType.INT64),
-        FieldSchema(name="created_at", dtype=DataType.VARCHAR, max_length=64),
-        FieldSchema(name="modified_at", dtype=DataType.VARCHAR, max_length=64),
-        FieldSchema(name="metadata", dtype=DataType.JSON),
-    ]
+    """从 DEFAULT_RAG_PROFILE 构建 FieldSchema 列表"""
+    from retrieval.profile import DEFAULT_RAG_PROFILE
+    fields = []
+    for fspec in DEFAULT_RAG_PROFILE.fields:
+        dtype_enum = _DTYPE_MAP[fspec.dtype]
+        kwargs: Dict[str, Any] = {
+            "name": fspec.name,
+            "dtype": dtype_enum,
+            "description": fspec.description,
+            "is_primary": fspec.is_primary,
+        }
+
+        if dtype_enum == DataType.VARCHAR:
+            kwargs["max_length"] = fspec.max_length or 256
+            if fspec.enable_analyzer is not None:
+                kwargs["enable_analyzer"] = fspec.enable_analyzer
+            if fspec.enable_match is not None:
+                kwargs["enable_match"] = fspec.enable_match
+        elif dtype_enum == DataType.FLOAT_VECTOR:
+            effective_dim = fspec.dim if fspec.dim is not None else dim
+            kwargs["dim"] = effective_dim
+
+        fields.append(FieldSchema(**kwargs))
+    return fields
 
 
 class MilvusClient:
@@ -136,15 +137,33 @@ class MilvusClient:
             kwargs["user"] = self.user
         if self.password:
             kwargs["password"] = self.password
-        if self.database and self.database != "default":
-            kwargs["db_name"] = self.database
 
+        # 先用 default 数据库建立连接，再切换到目标数据库
+        target_db = self.database
         logger.info(
             "Connecting to Milvus: %s:%s, database=%s",
-            self.host, self.port, self.database,
+            self.host, self.port, target_db,
         )
         self._client = PyMilvusClient(**kwargs)
         self._connected = True
+
+        # 连接后切换到目标数据库（如不存在则回退到 default）
+        if target_db and target_db != "default":
+            try:
+                existing = self._client.list_databases()
+                if target_db in existing:
+                    self._client.use_database(target_db)
+                    logger.info("Switched to database '%s'", target_db)
+                else:
+                    logger.warning(
+                        "Database '%s' does not exist, falling back to 'default'. Available: %s",
+                        target_db, existing,
+                    )
+                    self.database = "default"
+            except Exception as e:
+                logger.warning("Failed to switch to database '%s': %s, using 'default'", target_db, e)
+                self.database = "default"
+
         logger.info("Milvus connected successfully")
 
     def disconnect(self):
@@ -183,6 +202,9 @@ class MilvusClient:
 
     def using_database(self, db_name: str):
         """切换当前数据库"""
+        existing = self._client.list_databases()
+        if db_name not in existing:
+            raise ValueError(f"Database '{db_name}' does not exist. Available: {existing}")
         self._client.use_database(db_name)
         self.database = db_name
         logger.info("Switched to database '%s'", db_name)
@@ -324,20 +346,24 @@ class MilvusClient:
         )
         self._client.create_collection(collection_name=col_name, schema=schema)
 
-        # 创建向量索引
-        vi = vector_index or {}
-        emb_field = embedding_field_name or vi.get("field_name") or "embedding"
-        idx_type = vi.get("index_type", "IVF_FLAT")
-        metric = vi.get("metric_type", "COSINE")
-        idx_params = vi.get("params", {"nlist": 128})
+        # 创建向量索引（支持单个 dict 或 list[dict]）
+        if vector_index is None:
+            # 默认：为 embedding 字段建 IVF_FLAT 索引
+            emb_field = embedding_field_name or "embedding"
+            index_list = [{"field_name": emb_field, "index_type": "IVF_FLAT", "metric_type": "COSINE", "params": {"nlist": 128}}]
+        elif isinstance(vector_index, dict):
+            index_list = [vector_index]
+        else:
+            index_list = vector_index
 
         index_params = IndexParams()
-        index_params.add_index(
-            field_name=emb_field,
-            index_type=idx_type,
-            metric_type=metric,
-            **idx_params,
-        )
+        for vi in index_list:
+            index_params.add_index(
+                field_name=vi.get("field_name", "embedding"),
+                index_type=vi.get("index_type", "IVF_FLAT"),
+                metric_type=vi.get("metric_type", "COSINE"),
+                **vi.get("params", {"nlist": 128}),
+            )
         self._client.create_index(collection_name=col_name, index_params=index_params)
 
         # BM25 sparse 索引
@@ -352,15 +378,31 @@ class MilvusClient:
             self._client.create_index(collection_name=col_name, index_params=sparse_index_params)
 
         logger.info(
-            "Collection %s created with dim=%d, index=%s/%s, bm25=%s",
-            col_name, dim, idx_type, metric, enable_bm25,
+            "Collection %s created with dim=%d, vector_indexes=%d, bm25=%s",
+            col_name, dim, len(index_list), enable_bm25,
         )
 
-    def drop_collection(self):
-        """删除集合"""
-        if self.collection_exists():
-            self._client.drop_collection(self.collection_name)
-            logger.info("Collection %s dropped", self.collection_name)
+    def drop_collection(self, collection_name: Optional[str] = None, database: Optional[str] = None):
+        """删除集合
+
+        Args:
+            collection_name: 集合名称，None 则使用 self.collection_name
+            database: 指定数据库，None 则使用当前数据库
+        """
+        col_name = collection_name or self.collection_name
+        original_db = None
+        if database:
+            original_db = self.database
+            self.using_database(database)
+        try:
+            if self.has_collection(col_name):
+                self._client.drop_collection(col_name)
+                logger.info("Collection %s dropped (database=%s)", col_name, database or self.database)
+            else:
+                logger.info("Collection %s does not exist, skip dropping", col_name)
+        finally:
+            if original_db is not None:
+                self.using_database(original_db)
 
     def load_collection(self):
         """将集合加载到内存（搜索前必须调用）"""
@@ -441,12 +483,45 @@ class MilvusClient:
             output_fields=output_fields,
         )
 
-    def delete(self, expr: str):
+    def delete(self, expr: str, collection_name: Optional[str] = None):
         """按表达式删除"""
         return self._client.delete(
-            collection_name=self.collection_name,
+            collection_name=collection_name or self.collection_name,
             filter=expr,
         )
+
+    def list_collections(self) -> List[str]:
+        """列举当前数据库下所有集合"""
+        return self._client.list_collections()
+
+    def truncate_collection(self, collection_name: Optional[str] = None):
+        """清空集合数据（保留 schema）"""
+        col_name = collection_name or self.collection_name
+        if not self.has_collection(col_name):
+            raise ValueError(f"Collection '{col_name}' does not exist")
+        # 确保集合已加载
+        try:
+            self._client.load_collection(col_name)
+        except Exception:
+            pass
+        # 获取主键字段
+        info = self._client.describe_collection(col_name)
+        pk_field = None
+        for f in info.get("fields", []):
+            if f.get("is_primary", False):
+                pk_field = f["name"]
+                break
+        if pk_field is None:
+            raise ValueError(f"Cannot find primary key field in collection '{col_name}'")
+        # 按主键删除全部数据
+        result = self._client.delete(
+            collection_name=col_name,
+            filter=f'{pk_field} != ""',
+        )
+        self._client.flush(col_name)
+        deleted = result.get("delete_count", 0) if isinstance(result, dict) else 0
+        logger.info("Collection '%s' truncated, deleted %d rows", col_name, deleted)
+        return deleted
 
     def flush(self):
         """刷写集合数据"""

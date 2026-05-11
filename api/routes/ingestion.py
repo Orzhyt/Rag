@@ -21,31 +21,44 @@ def ingest_directory(
     if not folder.is_dir():
         raise ValueError(f"Path does not exist or is not a directory: {req.folder_path}")
 
-    service.init_collection(
-        drop_if_exists=req.drop_if_exists,
-        enable_bm25=req.enable_bm25,
-        collection_name=req.collection_name,
-    )
+    # 切换到指定数据库
+    original_db = None
+    if req.database:
+        original_db = service.client.database
+        service.client.using_database(req.database)
 
-    chunks = parse_directory(
-        req.folder_path,
-        chunk_size=req.chunk_size,
-        chunk_overlap=req.chunk_overlap,
-    )
+    try:
+        if req.collection_name is not None:
+            service.client.collection_name = req.collection_name
 
-    files_scanned = len({c.source_file for c in chunks})
-    chunks_parsed = len(chunks)
+        col_name = service.client.collection_name
+        if not service.client.has_collection(col_name):
+            raise ValueError(f"Collection '{col_name}' does not exist. Create it first via /collections/create.")
 
-    if not chunks:
-        return IngestResponse(files_scanned=files_scanned, chunks_parsed=0, chunks_inserted=0)
+        chunks = parse_directory(
+            req.folder_path,
+            chunk_size=req.chunk_size,
+            chunk_overlap=req.chunk_overlap,
+        )
 
-    if req.upsert_mode:
-        inserted = service.upsert(chunks)
-    else:
-        inserted = service.insert(chunks)
+        files_scanned = len({c.source_file for c in chunks})
+        chunks_parsed = len(chunks)
 
-    logger.info(
-        "Ingestion complete: %d files, %d chunks parsed, %d chunks inserted",
-        files_scanned, chunks_parsed, inserted,
-    )
+        if not chunks:
+            return IngestResponse(files_scanned=files_scanned, chunks_parsed=0, chunks_inserted=0)
+
+        if req.upsert_mode:
+            inserted = service.upsert(chunks)
+        else:
+            inserted = service.insert(chunks)
+
+        logger.info(
+            "Ingestion complete: %d files, %d chunks parsed, %d chunks inserted",
+            files_scanned, chunks_parsed, inserted,
+        )
+    finally:
+        # 恢复原始数据库
+        if original_db is not None:
+            service.client.using_database(original_db)
+
     return IngestResponse(files_scanned=files_scanned, chunks_parsed=chunks_parsed, chunks_inserted=inserted)

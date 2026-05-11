@@ -33,10 +33,9 @@ class IngestRequest(BaseModel):
     folder_path: str = Field(..., description="入库文件夹绝对路径")
     chunk_size: int = Field(500, gt=0, description="分块大小（字符数）")
     chunk_overlap: int = Field(50, ge=0, description="分块重叠字符数")
-    drop_if_exists: bool = Field(False, description="是否先删除已有集合")
-    enable_bm25: bool = Field(True, description="是否启用 BM25 全文检索")
     upsert_mode: bool = Field(True, description="True=upsert 覆盖, False=insert 新增")
-    collection_name: Optional[str] = Field(None, description="自定义集合名称，不提供则使用默认值")
+    collection_name: Optional[str] = Field(None, description="目标集合名称，不提供则使用默认值")
+    database: Optional[str] = Field(None, description="指定 Milvus 数据库，不提供则使用当前数据库")
 
 
 class IngestResponse(BaseModel):
@@ -82,6 +81,7 @@ class FieldDefinition(BaseModel):
     dim: Optional[int] = Field(None, description="FLOAT_VECTOR 维度")
     element_type: Optional[str] = Field(None, description="ARRAY 元素类型")
     max_capacity: Optional[int] = Field(None, description="ARRAY 最大容量")
+    embedding_source: Optional[str] = Field(None, description="FLOAT_VECTOR 字段的嵌入源字段名，如 content、title；不提供则默认嵌入 content")
     description: str = Field("", description="字段描述")
 
 
@@ -106,11 +106,12 @@ class CreateCollectionRequest(BaseModel):
     drop_if_exists: bool = False
     enable_bm25: bool = True
     collection_name: Optional[str] = Field(None, description="自定义集合名称，不提供则使用默认值")
-    fields: Optional[List[FieldDefinition]] = Field(None, description="自定义字段列表，不提供则使用默认 RAG 字段；提供则完全替换")
-    vector_index: Optional[VectorIndexParams] = Field(None, description="向量索引参数")
+    fields: Optional[List[FieldDefinition]] = Field(None, description="自定义字段列表，不提供则使用默认 RAG 字段")
+    vector_index: Optional[List[VectorIndexParams]] = Field(None, description="向量索引参数列表")
     bm25_config: Optional[BM25Config] = Field(None, description="BM25 配置，仅在 enable_bm25=True 时生效")
     description: Optional[str] = Field(None, description="集合 schema 描述")
     embedding_field_name: Optional[str] = Field(None, description="嵌入向量字段名，用于创建索引")
+    database: Optional[str] = Field(None, description="指定 Milvus 数据库，不提供则使用当前数据库")
 
 
 class InitCollectionRequest(BaseModel):
@@ -118,10 +119,11 @@ class InitCollectionRequest(BaseModel):
     enable_bm25: bool = True
     collection_name: Optional[str] = Field(None, description="自定义集合名称")
     fields: Optional[List[FieldDefinition]] = Field(None, description="自定义字段列表")
-    vector_index: Optional[VectorIndexParams] = Field(None, description="向量索引参数")
+    vector_index: Optional[List[VectorIndexParams]] = Field(None, description="向量索引参数列表")
     bm25_config: Optional[BM25Config] = Field(None, description="BM25 配置")
     description: Optional[str] = Field(None, description="集合 schema 描述")
     embedding_field_name: Optional[str] = Field(None, description="嵌入向量字段名")
+    database: Optional[str] = Field(None, description="指定 Milvus 数据库，不提供则使用当前数据库")
 
 
 class CollectionExistsResponse(BaseModel):
@@ -132,6 +134,11 @@ class DescribeCollectionResponse(BaseModel):
     name: str
     description: str
     fields: List[Dict[str, Any]]
+
+
+class DropCollectionRequest(BaseModel):
+    collection_name: Optional[str] = Field(None, description="集合名称，不提供则使用默认值")
+    database: Optional[str] = Field(None, description="指定 Milvus 数据库，不提供则使用当前数据库")
 
 
 class BM25SupportResponse(BaseModel):
@@ -148,6 +155,13 @@ class SearchRequest(BaseModel):
     offset: int = Field(0, ge=0)
     output_fields: Optional[List[str]] = None
     collection_names: Optional[List[str]] = Field(None, description="要检索的集合列表，不提供则使用默认集合")
+    database: Optional[str] = Field(None, description="指定 Milvus 数据库，不提供则使用当前数据库")
+    anns_field: Optional[str] = Field(None, description="要检索的向量字段名，不提供则使用 profile 中的 embedding_field")
+
+
+class AnnsFieldWeight(BaseModel):
+    field: str = Field(..., description="向量字段名")
+    weight: float = Field(..., gt=0, description="该字段的检索权重")
 
 
 class HybridSearchRequest(BaseModel):
@@ -160,6 +174,9 @@ class HybridSearchRequest(BaseModel):
     rrf_k: int = Field(60, gt=0)
     output_fields: Optional[List[str]] = None
     collection_names: Optional[List[str]] = Field(None, description="要检索的集合列表，不提供则使用默认集合")
+    database: Optional[str] = Field(None, description="指定 Milvus 数据库，不提供则使用当前数据库")
+    anns_field: Optional[str] = Field(None, description="要检索的向量字段名，不提供则使用 profile 中的 embedding_field")
+    anns_fields: Optional[List[AnnsFieldWeight]] = Field(None, description="多向量字段检索配置，每项指定字段名和权重；提供时忽略 anns_field 和 vector_weight")
 
 
 class QueryRequest(BaseModel):
@@ -168,33 +185,55 @@ class QueryRequest(BaseModel):
     offset: int = Field(0, ge=0)
     output_fields: Optional[List[str]] = None
     collection_names: Optional[List[str]] = Field(None, description="要查询的集合列表，不提供则使用默认集合")
+    database: Optional[str] = Field(None, description="指定 Milvus 数据库，不提供则使用当前数据库")
 
 
 class CountRequest(BaseModel):
     filter_expr: Optional[str] = None
+    database: Optional[str] = Field(None, description="指定 Milvus 数据库，不提供则使用当前数据库")
 
 
 class DeleteByChunkIdsRequest(BaseModel):
     chunk_ids: List[str] = Field(..., min_length=1)
+    collection_name: Optional[str] = Field(None, description="集合名称，不提供则使用默认值")
+    database: Optional[str] = Field(None, description="指定 Milvus 数据库，不提供则使用当前数据库")
 
 
 class DeleteBySourceRequest(BaseModel):
     source_file: str
+    collection_name: Optional[str] = Field(None, description="集合名称，不提供则使用默认值")
+    database: Optional[str] = Field(None, description="指定 Milvus 数据库，不提供则使用当前数据库")
+
+
+class DeleteByFieldRequest(BaseModel):
+    field_name: str = Field(..., description="字段名")
+    field_value: Any = Field(..., description="匹配的值")
+    collection_name: Optional[str] = Field(None, description="集合名称，不提供则使用默认值")
+    database: Optional[str] = Field(None, description="指定 Milvus 数据库，不提供则使用当前数据库")
+
+
+class TruncateCollectionsRequest(BaseModel):
+    collection_names: List[str] = Field(..., min_length=1, description="要清空的集合名称列表")
+    database: Optional[str] = Field(None, description="指定 Milvus 数据库，不提供则使用当前数据库")
+
+
+class TruncateDatabaseRequest(BaseModel):
+    database: str = Field(..., description="要清空的数据库")
 
 
 # ─── Search Results ───
 
 
 class SearchResultItem(BaseModel):
-    chunk_id: str
-    content: str
     score: float
-    source_file: str
-    file_name: str
-    file_type: str
-    chunk_index: int
-    collection_name: str = ""
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    fields: Dict[str, Any] = Field(default_factory=dict)
+
+    def model_dump(self, **kwargs):
+        """扁平化：把 fields 内容提升到顶层，保持向后兼容"""
+        d = super().model_dump(**kwargs)
+        flat = {"score": d.pop("score")}
+        flat.update(d.pop("fields", {}))
+        return flat
 
 
 class SearchResponse(BaseModel):

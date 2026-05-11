@@ -3,6 +3,7 @@ from typing import Optional
 from common.logger import setup_logger
 from milvus.client import MilvusClient
 from milvus.embedder import EmbeddingModel
+from retrieval.profile import DEFAULT_RAG_PROFILE
 from retrieval.service import MilvusService
 
 logger = setup_logger("api.deps")
@@ -25,7 +26,9 @@ def init_singletons():
     _milvus_client.connect()
     logger.info("Milvus connected")
 
-    _milvus_service = MilvusService(client=_milvus_client, embedder=_embedder)
+    _milvus_service = MilvusService(
+        client=_milvus_client, embedder=_embedder, profile=DEFAULT_RAG_PROFILE,
+    )
 
 
 def cleanup_singletons():

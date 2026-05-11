@@ -5,7 +5,8 @@ os.environ.setdefault("TORCHVISION_DISABLE_EXTENSION", "1")
 
 import pytest
 from dotenv import load_dotenv
-from milvus import MilvusClient, EmbeddingModel, MilvusService
+from milvus import MilvusClient, EmbeddingModel
+from retrieval.service import MilvusService
 
 load_dotenv()
 MILVUS_HOST = "localhost"
