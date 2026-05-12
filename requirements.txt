@@ -27,5 +27,10 @@ aiofiles==23.2.1
 scikit-learn==1.3.2
 numpy==1.26.2
 
+# Evaluation
+ragas>=0.4.3
+openai>=1.0.0
+langchain-openai>=1.2.0
+
 # Development
 pytest==7.4.3

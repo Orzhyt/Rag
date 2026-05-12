@@ -1,13 +1,15 @@
 from contextlib import asynccontextmanager
+import os
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pymilvus.exceptions import MilvusException
 
 from api.deps import cleanup_singletons, init_singletons
 from api.schemas import ErrorResponse
-from api.routes import collections, databases, data, health, search
+from api.routes import chat, collections, databases, data, health, search
 from common.logger import setup_logger
 
 logger = setup_logger("api.app")
@@ -82,3 +84,10 @@ app.include_router(data.router, prefix="/api/v1/data", tags=["Data"])
 app.include_router(databases.router, prefix="/api/v1/databases", tags=["Databases"])
 app.include_router(collections.router, prefix="/api/v1/collections", tags=["Collections"])
 app.include_router(search.router, prefix="/api/v1/search", tags=["Search"])
+app.include_router(chat.router, prefix="/api/v1/chat", tags=["Chat"])
+
+# ─── Static Frontend (production) ───
+
+_dist_dir = os.path.join(os.path.dirname(__file__), "..", "web", "dist")
+if os.path.isdir(_dist_dir):
+    app.mount("/", StaticFiles(directory=_dist_dir, html=True), name="frontend")

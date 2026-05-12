@@ -9,17 +9,21 @@ from api.schemas import (
     CreateCollectionRequest,
     DescribeCollectionResponse,
     DropCollectionRequest,
-    FieldDefinition,
     InitCollectionRequest,
     MessageResponse,
     TruncateCollectionsRequest,
     VectorIndexParams,
 )
-from milvus.client import MilvusClient, build_field_schema
+from milvus.client import MilvusClient
 from milvus.embedder import EmbeddingModel
 from retrieval.service import MilvusService
 
 router = APIRouter()
+
+
+def _switch_db(client: MilvusClient, database: Optional[str]):
+    if database and database != client.database:
+        client.using_database(database)
 
 
 @router.get("/exists", response_model=CollectionExistsResponse)
@@ -28,16 +32,9 @@ def collection_exists(
     database: Optional[str] = Query(None),
     client: MilvusClient = Depends(get_milvus_client),
 ):
-    original_db = None
-    if database:
-        original_db = client.database
-        client.using_database(database)
-    try:
-        name = collection_name or client.collection_name
-        exists = client.has_collection(name)
-    finally:
-        if original_db is not None:
-            client.using_database(original_db)
+    _switch_db(client, database)
+    name = collection_name or client.collection_name
+    exists = client.has_collection(name)
     return CollectionExistsResponse(exists=exists)
 
 
@@ -47,16 +44,9 @@ def describe_collection(
     database: Optional[str] = Query(None),
     client: MilvusClient = Depends(get_milvus_client),
 ):
-    original_db = None
-    if database:
-        original_db = client.database
-        client.using_database(database)
-    try:
-        name = collection_name or client.collection_name
-        info = client.describe_collection(name)
-    finally:
-        if original_db is not None:
-            client.using_database(original_db)
+    _switch_db(client, database)
+    name = collection_name or client.collection_name
+    info = client.describe_collection(name)
     return DescribeCollectionResponse(
         name=info.get("name", name),
         description=info.get("description", ""),
@@ -70,23 +60,16 @@ def bm25_support(
     database: Optional[str] = Query(None),
     client: MilvusClient = Depends(get_milvus_client),
 ):
-    original_db = None
-    if database:
-        original_db = client.database
-        client.using_database(database)
-    try:
-        col_name = collection_name or client.collection_name
-        if not client.has_collection(col_name):
-            return BM25SupportResponse(has_bm25_support=False)
-        info = client._client.describe_collection(col_name)
-        has_support = any(
-            f.get("type").name == "SPARSE_FLOAT_VECTOR"
-            for f in info.get("fields", [])
-            if hasattr(f.get("type"), "name")
-        )
-    finally:
-        if original_db is not None:
-            client.using_database(original_db)
+    _switch_db(client, database)
+    col_name = collection_name or client.collection_name
+    if not client.has_collection(col_name):
+        return BM25SupportResponse(has_bm25_support=False)
+    info = client._client.describe_collection(col_name)
+    has_support = any(
+        f.get("type").name == "SPARSE_FLOAT_VECTOR"
+        for f in info.get("fields", [])
+        if hasattr(f.get("type"), "name")
+    )
     return BM25SupportResponse(has_bm25_support=has_support)
 
 
@@ -96,56 +79,28 @@ def create_collection(
     client: MilvusClient = Depends(get_milvus_client),
     embedder: EmbeddingModel = Depends(get_embedder),
 ):
-    # 切换到指定数据库
-    original_db = None
-    if req.database:
-        original_db = client.database
-        client.using_database(req.database)
+    _switch_db(client, req.database)
 
-    try:
-        dim = req.dim if req.dim is not None else embedder.dim
+    dim = req.dim if req.dim is not None else embedder.dim
 
-        # 构建自定义字段列表
-        field_schemas = None
-        if req.fields is not None:
-            field_schemas = [build_field_schema(fd, dim=dim) for fd in req.fields]
+    vector_index = None
+    if req.vector_index is not None:
+        vector_index = [
+            {"field_name": vi.field_name, "index_type": vi.index_type,
+             "metric_type": vi.metric_type, "params": vi.params}
+            for vi in req.vector_index
+        ]
 
-        # 构建向量索引
-        vector_index = None
-        if req.vector_index is not None:
-            vector_index = [
-                {"field_name": vi.field_name, "index_type": vi.index_type,
-                 "metric_type": vi.metric_type, "params": vi.params}
-                for vi in req.vector_index
-            ]
+    client.create_collection(
+        dim=dim,
+        drop_if_exists=req.drop_if_exists,
+        collection_name=req.collection_name,
+        fields=req.fields,
+        vector_index=vector_index,
+        description=req.description,
+    )
 
-        # BM25 配置
-        bm25_config = None
-        if req.bm25_config is not None:
-            bm25_config = {
-                "text_field_name": req.bm25_config.text_field_name,
-                "sparse_field_name": req.bm25_config.sparse_field_name,
-                "function_name": req.bm25_config.function_name,
-            }
-
-        client.create_collection(
-            dim=dim,
-            drop_if_exists=req.drop_if_exists,
-            enable_bm25=req.enable_bm25,
-            collection_name=req.collection_name,
-            fields=field_schemas,
-            vector_index=vector_index,
-            bm25_config=bm25_config,
-            description=req.description,
-            embedding_field_name=req.embedding_field_name,
-        )
-
-        effective_name = req.collection_name or client.collection_name
-    finally:
-        # 恢复原始数据库
-        if original_db is not None:
-            client.using_database(original_db)
-
+    effective_name = req.collection_name or client.collection_name
     return MessageResponse(message=f"Collection '{effective_name}' created (dim={dim})")
 
 
@@ -154,54 +109,29 @@ def init_collection(
     req: InitCollectionRequest,
     service: MilvusService = Depends(get_milvus_service),
 ):
-    # 切换到指定数据库
-    original_db = None
-    if req.database:
-        original_db = service.client.database
-        service.client.using_database(req.database)
+    _switch_db(service.client, req.database)
 
-    try:
-        field_schemas = None
-        if req.fields is not None:
-            field_schemas = [build_field_schema(fd) for fd in req.fields]
-
-        vector_index = None
-        if req.vector_index is not None:
-            vector_index = [
-                {
-                    "field_name": vi.field_name,
-                    "index_type": vi.index_type,
-                    "metric_type": vi.metric_type,
-                    "params": vi.params,
-                }
-                for vi in req.vector_index
-            ]
-
-        bm25_config = None
-        if req.bm25_config is not None:
-            bm25_config = {
-                "text_field_name": req.bm25_config.text_field_name,
-                "sparse_field_name": req.bm25_config.sparse_field_name,
-                "function_name": req.bm25_config.function_name,
+    vector_index = None
+    if req.vector_index is not None:
+        vector_index = [
+            {
+                "field_name": vi.field_name,
+                "index_type": vi.index_type,
+                "metric_type": vi.metric_type,
+                "params": vi.params,
             }
+            for vi in req.vector_index
+        ]
 
-        service.init_collection(
-            drop_if_exists=req.drop_if_exists,
-            enable_bm25=req.enable_bm25,
-            collection_name=req.collection_name,
-            fields=field_schemas,
-            vector_index=vector_index,
-            bm25_config=bm25_config,
-            description=req.description,
-            embedding_field_name=req.embedding_field_name,
-        )
+    service.init_collection(
+        drop_if_exists=req.drop_if_exists,
+        collection_name=req.collection_name,
+        fields=req.fields,
+        vector_index=vector_index,
+        description=req.description,
+    )
 
-        effective_name = req.collection_name or service.client.collection_name
-    finally:
-        # 恢复原始数据库
-        if original_db is not None:
-            service.client.using_database(original_db)
-
+    effective_name = req.collection_name or service.client.collection_name
     return MessageResponse(message=f"Collection '{effective_name}' initialized")
 
 
@@ -220,17 +150,10 @@ def truncate_collections(
     req: TruncateCollectionsRequest,
     service: MilvusService = Depends(get_milvus_service),
 ):
-    original_db = None
-    if req.database:
-        original_db = service.client.database
-        service.client.using_database(req.database)
-    try:
-        total_deleted = 0
-        for col_name in req.collection_names:
-            total_deleted += service.truncate_collection(collection_name=col_name)
-    finally:
-        if original_db is not None:
-            service.client.using_database(original_db)
+    _switch_db(service.client, req.database)
+    total_deleted = 0
+    for col_name in req.collection_names:
+        total_deleted += service.truncate_collection(collection_name=col_name)
     return MessageResponse(
         message=f"Truncated {len(req.collection_names)} collections, total {total_deleted} rows deleted"
     )

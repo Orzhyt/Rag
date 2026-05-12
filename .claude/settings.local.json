@@ -24,7 +24,13 @@
       "Bash(python3 -c \"import importlib; m=importlib.import_module\\('sentence_transformers'\\); print\\(m.__file__\\)\")",
       "Bash(nvidia-smi)",
       "Bash(pip uninstall *)",
-      "Bash(curl *)"
+      "Bash(curl *)",
+      "WebFetch(domain:docs.ragas.io)",
+      "WebFetch(domain:ragas.io)",
+      "Bash(npm create *)",
+      "Bash(npm install *)",
+      "Bash(npx tsc *)",
+      "Bash(npm run *)"
     ]
   }
 }

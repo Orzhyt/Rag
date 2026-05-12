@@ -24,35 +24,12 @@ import os
 import re
 import hashlib
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from common import logger
-
-
-# ============================================================================
-# 数据结构
-# ============================================================================
-
-@dataclass
-class ParsedChunk:
-    """解析后的文本块，可直接入库 Milvus"""
-    chunk_id: str
-    content: str
-    source_file: str
-    file_name: str
-    file_type: str
-    chunk_index: int
-    total_chunks: int
-    page_number: Optional[int] = None
-    sheet_name: Optional[str] = None
-    title: Optional[str] = None
-    file_size: int = 0
-    created_at: Optional[str] = None
-    modified_at: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+from retrieval.profile import ParsedChunk
 
 
 

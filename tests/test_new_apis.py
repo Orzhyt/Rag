@@ -2,7 +2,7 @@
 drop_collection with database, 以及已有接口的 database 参数支持。"""
 
 import pytest
-from data_pipeline.parser import ParsedChunk
+from retrieval.profile import ParsedChunk
 from milvus import MilvusClient
 from retrieval.service import MilvusService
 
@@ -52,7 +52,7 @@ def test_db_service(test_db_client, embedder):
     """在测试数据库下创建 MilvusService 并初始化集合"""
     test_db_client.using_database(TEST_DB)
     service = MilvusService(client=test_db_client, embedder=embedder)
-    service.init_collection(drop_if_exists=True, enable_bm25=True)
+    service.init_collection(drop_if_exists=True)
     yield service
     try:
         test_db_client.release_collection()
@@ -254,12 +254,12 @@ class TestTruncateDatabase:
         service = MilvusService(client=test_db_client, embedder=embedder)
         # 插入到第一个集合
         service.client.collection_name = TEST_COL
-        service.init_collection(enable_bm25=True)
+        service.init_collection()
         service.insert([_make_chunk("tdb_001", "DB内容1")])
 
         # 插入到第二个集合
         service.client.collection_name = TEST_COL_2
-        service.init_collection(enable_bm25=True)
+        service.init_collection()
         service.insert([_make_chunk("tdb_002", "DB内容2")])
 
         # 通过 client 层清空整个数据库

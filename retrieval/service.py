@@ -1,13 +1,12 @@
-import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-from pymilvus import AnnSearchRequest, FieldSchema, RRFRanker, WeightedRanker
+from pymilvus import AnnSearchRequest, RRFRanker, WeightedRanker
 
-from data_pipeline.parser import ParsedChunk
+from retrieval.profile import ParsedChunk
 from common.logger import setup_logger
 
-from milvus.client import MAX_CONTENT_LENGTH, MilvusClient
+from milvus.client import  MilvusClient
 from milvus.embedder import EmbeddingModel
 from retrieval.profile import CollectionProfile, DEFAULT_RAG_PROFILE, build_insert_rows
 
@@ -81,13 +80,10 @@ class MilvusService:
     def init_collection(
         self,
         drop_if_exists: bool = False,
-        enable_bm25: bool = True,
         collection_name: Optional[str] = None,
-        fields: Optional[List[FieldSchema]] = None,
+        fields: Optional[List] = None,
         vector_index: Optional[Dict[str, Any]] = None,
-        bm25_config: Optional[Dict[str, Any]] = None,
         description: Optional[str] = None,
-        embedding_field_name: Optional[str] = None,
     ):
         self.client.connect()
         if collection_name is not None:
@@ -97,19 +93,15 @@ class MilvusService:
             self.client.create_collection(
                 dim=self.embedder.dim,
                 drop_if_exists=drop_if_exists,
-                enable_bm25=enable_bm25,
                 collection_name=collection_name,
                 fields=fields,
                 vector_index=vector_index,
-                bm25_config=bm25_config,
                 description=description,
-                embedding_field_name=embedding_field_name,
             )
-        elif enable_bm25 and not self.client.has_bm25_support:
+        elif not self.client.has_bm25_support:
             logger.warning(
                 "Collection '%s' exists but lacks BM25 sparse vector field. "
-                "Hybrid search will not work. Re-create with drop_if_exists=True "
-                "or set enable_bm25=False.",
+                "Hybrid search will not work. Re-create with drop_if_exists=True.",
                 self.client.collection_name,
             )
         self.client.load_collection()
@@ -180,60 +172,17 @@ class MilvusService:
                 except Exception:
                     pass
 
-    def search(
-        self,
-        query: str,
-        top_k: int = 10,
-        filter_expr: Optional[str] = None,
-        offset: int = 0,
-        output_fields: List[str] = None,
-        collection_names: Optional[List[str]] = None,
-        anns_field: Optional[str] = None,
-    ) -> List[SearchResult]:
-        if collection_names is None:
-            collection_names = [self.client.collection_name]
-        self._ensure_loaded(collection_names)
-
-        query_vec = self.embedder.encode([query])[0]
-
-        if output_fields is None:
-            output_fields = self.profile.output_fields
-
-        effective_anns_field = anns_field or self.profile.embedding_field
-        search_params = {"metric_type": "COSINE", "params": {"nprobe": 16}}
-
-        all_results = []
-        for col_name in collection_names:
-            results = self.client.search(
-                data=[query_vec],
-                anns_field=effective_anns_field,
-                search_params=search_params,
-                limit=top_k,
-                offset=offset,
-                expr=filter_expr,
-                output_fields=output_fields,
-                collection_name=col_name,
-            )
-            all_results.extend(
-                SearchResult.from_hit(hit, profile=self.profile, collection_name=col_name)
-                for hit in results[0]
-            )
-
-        return all_results
-
     def hybrid_search(
         self,
         query: str,
         top_k: int = 10,
         filter_expr: Optional[str] = None,
-        vector_weight: float = 0.7,
-        bm25_weight: float = 0.3,
         reranker: str = "weighted",
         rrf_k: int = 60,
         output_fields: List[str] = None,
         collection_names: Optional[List[str]] = None,
-        anns_field: Optional[str] = None,
         anns_fields: Optional[List[Dict[str, Any]]] = None,
+        bm25_fields: Optional[List[Dict[str, Any]]] = None,
     ) -> List[SearchResult]:
         if collection_names is None:
             collection_names = [self.client.collection_name]
@@ -248,8 +197,8 @@ class MilvusService:
         reqs = []
         weights = []
 
-        if anns_fields:
-            # 多向量字段模式：每个字段一个 dense req
+        # 向量字段: None=从 profile 默认, []=不使用, list=显式指定
+        if anns_fields is not None:
             for item in anns_fields:
                 reqs.append(AnnSearchRequest(
                     data=[query_vec],
@@ -260,27 +209,45 @@ class MilvusService:
                 ))
                 weights.append(item["weight"])
         else:
-            # 单向量字段模式
-            effective_anns_field = anns_field or self.profile.embedding_field
-            reqs.append(AnnSearchRequest(
-                data=[query_vec],
-                anns_field=effective_anns_field,
-                param={"metric_type": "COSINE", "params": {"nprobe": 16}},
-                limit=top_k,
-                expr=filter_expr,
-            ))
-            weights.append(vector_weight)
+            vec_fields = [f for f in self.profile.fields if f.dtype == "FLOAT_VECTOR"]
+            if vec_fields:
+                per_vec_weight = 0.7 / len(vec_fields)
+                for vf in vec_fields:
+                    reqs.append(AnnSearchRequest(
+                        data=[query_vec],
+                        anns_field=vf.name,
+                        param={"metric_type": "COSINE", "params": {"nprobe": 16}},
+                        limit=top_k,
+                        expr=filter_expr,
+                    ))
+                    weights.append(per_vec_weight)
 
-        # BM25 sparse req
-        sparse_req = AnnSearchRequest(
-            data=[query],
-            anns_field=self.profile.bm25_text_field + "_sparse",
-            param={"metric_type": "BM25"},
-            limit=top_k,
-            expr=filter_expr,
-        )
-        reqs.append(sparse_req)
-        weights.append(bm25_weight)
+        # BM25 字段: None=从 profile 默认, []=不使用, list=显式指定
+        if bm25_fields is not None:
+            for item in bm25_fields:
+                sparse_req = AnnSearchRequest(
+                    data=[query],
+                    anns_field=f"{item['field']}_sparse",
+                    param={"metric_type": "BM25"},
+                    limit=top_k,
+                    expr=filter_expr,
+                )
+                reqs.append(sparse_req)
+                weights.append(item["weight"])
+        else:
+            bm25_field_list = self.profile.bm25_fields
+            if bm25_field_list:
+                per_bm25_weight = 0.3 / len(bm25_field_list)
+                for bm25_f in bm25_field_list:
+                    sparse_req = AnnSearchRequest(
+                        data=[query],
+                        anns_field=f"{bm25_f.name}_sparse",
+                        param={"metric_type": "BM25"},
+                        limit=top_k,
+                        expr=filter_expr,
+                    )
+                    reqs.append(sparse_req)
+                    weights.append(per_bm25_weight)
 
         if reranker == "rrf":
             ranker = RRFRanker(k=rrf_k)
@@ -301,7 +268,7 @@ class MilvusService:
                 if "not found" in str(e).lower() or "sparse" in str(e).lower():
                     raise RuntimeError(
                         "Hybrid search requires BM25 support. "
-                        "Re-create the collection with enable_bm25=True."
+                        "Re-create the collection with BM25 fields enabled."
                     ) from e
                 raise
             all_results.extend(

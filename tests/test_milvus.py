@@ -1,9 +1,8 @@
 import pytest
-from pymilvus import DataType, FieldSchema
-from data_pipeline.parser import ParsedChunk
-from milvus import MilvusClient, MilvusService
-from milvus.client import build_field_schema, build_default_rag_fields
-from api.schemas import FieldDefinition
+from pymilvus import DataType
+from retrieval.profile import ParsedChunk, FieldSpec, to_field_schema, DEFAULT_RAG_PROFILE
+from milvus.client import MilvusClient
+from retrieval.service import MilvusService
 
 
 # ============================================================================
@@ -44,15 +43,12 @@ class TestDatabase:
 
     def test_create_and_drop_database(self, milvus_client):
         test_db = "test_db_temp"
-        # 创建
         milvus_client.create_database(test_db)
         dbs = milvus_client.list_databases()
         assert test_db in dbs
 
-        # 重复创建不报错
         milvus_client.create_database(test_db)
 
-        # 删除
         milvus_client.drop_database(test_db)
         dbs = milvus_client.list_databases()
         assert test_db not in dbs
@@ -63,7 +59,6 @@ class TestDatabase:
         milvus_client.using_database(test_db)
         assert milvus_client.database == test_db
 
-        # 切回 default
         milvus_client.using_database("default")
         assert milvus_client.database == "default"
 
@@ -87,13 +82,11 @@ class TestCollection:
         assert desc["name"] == milvus_client.collection_name
         assert len(desc["fields"]) > 0
 
-        # 检查关键字段
         field_names = [f["name"] for f in desc["fields"]]
         assert "chunk_id" in field_names
         assert "embedding" in field_names
         assert "content" in field_names
 
-        # 检查向量字段维度
         embedding_field = next(f for f in desc["fields"] if f["name"] == "embedding")
         assert embedding_field["dim"] == embedder.dim
 
@@ -160,9 +153,8 @@ class TestSearch:
         ]
         milvus_service.insert(chunks)
 
-        results = milvus_service.search("什么是人工智能", top_k=3)
+        results = milvus_service.hybrid_search("什么是人工智能", top_k=3, bm25_fields=[])
         assert len(results) > 0
-        # AI 相关内容应排在最前
         assert results[0].chunk_id == "sea_001"
         assert results[0].score > 0
 
@@ -173,7 +165,7 @@ class TestSearch:
         ]
         milvus_service.insert(chunks)
 
-        results = milvus_service.search("技术", top_k=10, filter_expr='file_name == "ai.pdf"')
+        results = milvus_service.hybrid_search("技术", top_k=10, filter_expr='file_name == "ai.pdf"', bm25_fields=[])
         assert all(r.file_name == "ai.pdf" for r in results)
 
 
@@ -308,20 +300,27 @@ class TestHybridSearch:
 
 class TestCollectionBM25:
     def test_create_collection_with_bm25(self, milvus_client, embedder):
-        milvus_client.create_collection(
-            dim=embedder.dim, drop_if_exists=True, enable_bm25=True
-        )
+        milvus_client.create_collection(dim=embedder.dim, drop_if_exists=True)
         desc = milvus_client.describe_collection()
         field_names = [f["name"] for f in desc["fields"]]
         assert "content_sparse" in field_names
 
     def test_create_collection_without_bm25(self, milvus_client, embedder):
+        custom_name = "test_no_bm25"
+        fields = [
+            FieldSpec(name="chunk_id", dtype="VARCHAR", is_primary=True, max_length=256),
+            FieldSpec(name="content", dtype="VARCHAR", max_length=16384,
+                      enable_analyzer=True, enable_match=True),
+            FieldSpec(name="embedding", dtype="FLOAT_VECTOR"),
+        ]
         milvus_client.create_collection(
-            dim=embedder.dim, drop_if_exists=True, enable_bm25=False
+            dim=embedder.dim, drop_if_exists=True,
+            collection_name=custom_name, fields=fields,
         )
-        desc = milvus_client.describe_collection()
+        desc = milvus_client.describe_collection(custom_name)
         field_names = [f["name"] for f in desc["fields"]]
         assert "content_sparse" not in field_names
+        milvus_client._client.drop_collection(custom_name)
 
 
 # ============================================================================
@@ -330,85 +329,85 @@ class TestCollectionBM25:
 
 
 class TestBuildFieldSchema:
-    """build_field_schema 单元测试（不需要 Milvus 连接）"""
+    """to_field_schema 单元测试（不需要 Milvus 连接）"""
 
     def test_varchar_field(self):
-        fd = FieldDefinition(name="title", dtype="VARCHAR", max_length=512)
-        fs = build_field_schema(fd)
+        fd = FieldSpec(name="title", dtype="VARCHAR", max_length=512)
+        fs = to_field_schema(fd)
         assert fs.name == "title"
         assert fs.dtype == DataType.VARCHAR
         assert fs.params.get("max_length") == 512
 
     def test_varchar_default_max_length(self):
-        fd = FieldDefinition(name="name", dtype="VARCHAR")
-        fs = build_field_schema(fd)
+        fd = FieldSpec(name="name", dtype="VARCHAR")
+        fs = to_field_schema(fd)
         assert fs.params.get("max_length") == 256
 
     def test_float_vector_with_dim(self):
-        fd = FieldDefinition(name="vec", dtype="FLOAT_VECTOR", dim=768)
-        fs = build_field_schema(fd)
+        fd = FieldSpec(name="vec", dtype="FLOAT_VECTOR", dim=768)
+        fs = to_field_schema(fd)
         assert fs.dtype == DataType.FLOAT_VECTOR
         assert fs.params.get("dim") == 768
 
     def test_float_vector_with_request_dim(self):
-        fd = FieldDefinition(name="vec", dtype="FLOAT_VECTOR")
-        fs = build_field_schema(fd, dim=1024)
+        fd = FieldSpec(name="vec", dtype="FLOAT_VECTOR")
+        fs = to_field_schema(fd, dim=1024)
         assert fs.params.get("dim") == 1024
 
     def test_float_vector_missing_dim_raises(self):
-        fd = FieldDefinition(name="vec", dtype="FLOAT_VECTOR")
+        fd = FieldSpec(name="vec", dtype="FLOAT_VECTOR")
         with pytest.raises(ValueError, match="no dim provided"):
-            build_field_schema(fd)
+            to_field_schema(fd)
 
     def test_int64_field(self):
-        fd = FieldDefinition(name="count", dtype="INT64")
-        fs = build_field_schema(fd)
+        fd = FieldSpec(name="count", dtype="INT64")
+        fs = to_field_schema(fd)
         assert fs.dtype == DataType.INT64
 
     def test_json_field(self):
-        fd = FieldDefinition(name="meta", dtype="JSON")
-        fs = build_field_schema(fd)
+        fd = FieldSpec(name="meta", dtype="JSON")
+        fs = to_field_schema(fd)
         assert fs.dtype == DataType.JSON
 
     def test_bool_field(self):
-        fd = FieldDefinition(name="active", dtype="BOOL")
-        fs = build_field_schema(fd)
+        fd = FieldSpec(name="active", dtype="BOOL")
+        fs = to_field_schema(fd)
         assert fs.dtype == DataType.BOOL
 
     def test_primary_key(self):
-        fd = FieldDefinition(name="id", dtype="VARCHAR", max_length=128, is_primary=True)
-        fs = build_field_schema(fd)
+        fd = FieldSpec(name="id", dtype="VARCHAR", max_length=128, is_primary=True)
+        fs = to_field_schema(fd)
         assert fs.is_primary
 
     def test_bm25_varchar_field(self):
-        fd = FieldDefinition(
+        fd = FieldSpec(
             name="content", dtype="VARCHAR", max_length=8192,
             enable_analyzer=True, enable_match=True,
         )
-        fs = build_field_schema(fd)
+        fs = to_field_schema(fd)
         assert fs.params.get("enable_analyzer") is True
         assert fs.params.get("enable_match") is True
 
     def test_array_field_missing_element_type(self):
-        fd = FieldDefinition(name="tags", dtype="ARRAY")
+        fd = FieldSpec(name="tags", dtype="ARRAY")
         with pytest.raises(ValueError, match="element_type not provided"):
-            build_field_schema(fd)
+            to_field_schema(fd)
 
     def test_array_field(self):
-        fd = FieldDefinition(name="tags", dtype="ARRAY", element_type="VARCHAR", max_capacity=10)
-        fs = build_field_schema(fd)
+        fd = FieldSpec(name="tags", dtype="ARRAY", element_type="VARCHAR", max_capacity=10)
+        fs = to_field_schema(fd)
         assert fs.dtype == DataType.ARRAY
 
 
 class TestBuildDefaultRagFields:
-    """build_default_rag_fields 单元测试"""
+    """DEFAULT_RAG_PROFILE.to_field_schemas() 单元测试"""
 
     def test_field_count(self):
-        fields = build_default_rag_fields(dim=768, enable_bm25=False)
-        assert len(fields) == 15
+        fields = DEFAULT_RAG_PROFILE.to_field_schemas(dim=768)
+        assert len(fields) == 16  # 15 original + file_name_embedding
 
     def test_key_fields_present(self):
-        fields = build_default_rag_fields(dim=768, enable_bm25=True)
+        fields = DEFAULT_RAG_PROFILE.to_field_schemas(dim=768)
         names = [f.name for f in fields]
         assert "chunk_id" in names
         assert "content" in names
@@ -416,26 +415,20 @@ class TestBuildDefaultRagFields:
         assert "metadata" in names
 
     def test_primary_key(self):
-        fields = build_default_rag_fields(dim=768, enable_bm25=False)
+        fields = DEFAULT_RAG_PROFILE.to_field_schemas(dim=768)
         pk = next(f for f in fields if f.is_primary)
         assert pk.name == "chunk_id"
 
     def test_embedding_dim(self):
-        fields = build_default_rag_fields(dim=1024, enable_bm25=False)
+        fields = DEFAULT_RAG_PROFILE.to_field_schemas(dim=1024)
         emb = next(f for f in fields if f.name == "embedding")
         assert emb.params.get("dim") == 1024
 
-    def test_content_bm25_enabled(self):
-        fields = build_default_rag_fields(dim=768, enable_bm25=True)
+    def test_content_bm25_attributes(self):
+        fields = DEFAULT_RAG_PROFILE.to_field_schemas(dim=768)
         content = next(f for f in fields if f.name == "content")
         assert content.params.get("enable_analyzer") is True
         assert content.params.get("enable_match") is True
-
-    def test_content_bm25_disabled(self):
-        fields = build_default_rag_fields(dim=768, enable_bm25=False)
-        content = next(f for f in fields if f.name == "content")
-        assert content.params.get("enable_analyzer") is None
-        assert content.params.get("enable_match") is None
 
 
 class TestCustomCollection:
@@ -451,7 +444,6 @@ class TestCustomCollection:
         assert milvus_client.has_collection(custom_name)
         desc = milvus_client.describe_collection(custom_name)
         assert desc["name"] == custom_name
-        # 清理
         milvus_client._client.drop_collection(custom_name)
 
     def test_custom_description(self, milvus_client, embedder):
@@ -469,25 +461,19 @@ class TestCustomCollection:
     def test_custom_fields_with_bm25(self, milvus_client, embedder):
         custom_name = "test_custom_fields_bm25"
         fields = [
-            FieldSchema(name="id", dtype=DataType.VARCHAR, max_length=128, is_primary=True),
-            FieldSchema(name="desc", dtype=DataType.VARCHAR, max_length=8192, enable_analyzer=True, enable_match=True),
-            FieldSchema(name="vec", dtype=DataType.FLOAT_VECTOR, dim=embedder.dim),
-            FieldSchema(name="category", dtype=DataType.VARCHAR, max_length=256),
-            FieldSchema(name="price", dtype=DataType.FLOAT),
-            FieldSchema(name="tags", dtype=DataType.JSON),
+            FieldSpec(name="id", dtype="VARCHAR", is_primary=True, max_length=128),
+            FieldSpec(name="desc", dtype="VARCHAR", max_length=8192,
+                      enable_analyzer=True, enable_match=True, enable_bm25=True),
+            FieldSpec(name="vec", dtype="FLOAT_VECTOR"),
+            FieldSpec(name="category", dtype="VARCHAR", max_length=256),
+            FieldSpec(name="price", dtype="FLOAT"),
+            FieldSpec(name="tags", dtype="JSON"),
         ]
         milvus_client.create_collection(
             dim=embedder.dim,
             drop_if_exists=True,
             collection_name=custom_name,
             fields=fields,
-            enable_bm25=True,
-            bm25_config={
-                "text_field_name": "desc",
-                "sparse_field_name": "desc_sparse",
-                "function_name": "desc_bm25",
-            },
-            embedding_field_name="vec",
             vector_index={
                 "field_name": "vec",
                 "index_type": "IVF_FLAT",
@@ -510,23 +496,21 @@ class TestCustomCollection:
     def test_custom_fields_without_bm25(self, milvus_client, embedder):
         custom_name = "test_custom_fields_no_bm25"
         fields = [
-            FieldSchema(name="doc_id", dtype=DataType.VARCHAR, max_length=64, is_primary=True),
-            FieldSchema(name="text", dtype=DataType.VARCHAR, max_length=4096),
-            FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=embedder.dim),
+            FieldSpec(name="doc_id", dtype="VARCHAR", is_primary=True, max_length=64),
+            FieldSpec(name="text", dtype="VARCHAR", max_length=4096),
+            FieldSpec(name="embedding", dtype="FLOAT_VECTOR"),
         ]
         milvus_client.create_collection(
             dim=embedder.dim,
             drop_if_exists=True,
             collection_name=custom_name,
             fields=fields,
-            enable_bm25=False,
         )
         desc = milvus_client.describe_collection(custom_name)
         field_names = [f["name"] for f in desc["fields"]]
         assert "doc_id" in field_names
         assert "text" in field_names
         assert "embedding" in field_names
-        # 不应有 sparse 字段
         assert not any("sparse" in n for n in field_names)
         milvus_client._client.drop_collection(custom_name)
 
@@ -548,41 +532,8 @@ class TestCustomCollection:
         assert desc["name"] == custom_name
         milvus_client._client.drop_collection(custom_name)
 
-    def test_bm25_text_field_not_found_raises(self, milvus_client, embedder):
-        custom_name = "test_bm25_missing_text"
-        fields = [
-            FieldSchema(name="id", dtype=DataType.VARCHAR, max_length=128, is_primary=True),
-            FieldSchema(name="vec", dtype=DataType.FLOAT_VECTOR, dim=embedder.dim),
-        ]
-        with pytest.raises(ValueError, match="not found"):
-            milvus_client.create_collection(
-                dim=embedder.dim,
-                drop_if_exists=True,
-                collection_name=custom_name,
-                fields=fields,
-                enable_bm25=True,
-                bm25_config={"text_field_name": "nonexistent"},
-            )
-
-    def test_bm25_duplicate_sparse_field_raises(self, milvus_client, embedder):
-        custom_name = "test_bm25_dup_sparse"
-        fields = [
-            FieldSchema(name="id", dtype=DataType.VARCHAR, max_length=128, is_primary=True),
-            FieldSchema(name="content", dtype=DataType.VARCHAR, max_length=8192, enable_analyzer=True, enable_match=True),
-            FieldSchema(name="content_sparse", dtype=DataType.SPARSE_FLOAT_VECTOR),
-            FieldSchema(name="vec", dtype=DataType.FLOAT_VECTOR, dim=embedder.dim),
-        ]
-        with pytest.raises(ValueError, match="already exists"):
-            milvus_client.create_collection(
-                dim=embedder.dim,
-                drop_if_exists=True,
-                collection_name=custom_name,
-                fields=fields,
-                enable_bm25=True,
-            )
-
     def test_backward_compatible_default(self, milvus_client, embedder):
-        """不传新参数时行为与原来一致"""
+        """不传 fields 时使用 DEFAULT_RAG_PROFILE，content 的 enable_bm25=True 自动生成 content_sparse"""
         milvus_client.create_collection(dim=embedder.dim, drop_if_exists=True)
         desc = milvus_client.describe_collection()
         field_names = [f["name"] for f in desc["fields"]]

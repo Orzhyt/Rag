@@ -1,7 +1,6 @@
 from .scanner import FileScanner, scan_files
 from .parser import (
     BaseParser,
-    ParsedChunk,
     ParserRegistry,
     DocumentParser,
     RecursiveTextSplitter,
@@ -16,6 +15,7 @@ from .parser import (
     parse_files,
     parse_directory,
 )
+from retrieval.profile import ParsedChunk
 
 __all__ = [
     # scanner

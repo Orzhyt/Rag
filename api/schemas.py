@@ -2,6 +2,8 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
+from retrieval.profile import FieldSpec
+
 
 # ─── Common ───
 
@@ -66,25 +68,6 @@ class ListDatabasesResponse(BaseModel):
 # ─── Collection Management ───
 
 
-class FieldDefinition(BaseModel):
-    name: str = Field(..., description="字段名")
-    dtype: str = Field(
-        ...,
-        description="Milvus DataType 名称，如 VARCHAR, INT64, FLOAT_VECTOR, JSON, BOOL, SPARSE_FLOAT_VECTOR",
-        pattern=r"^(BOOL|INT8|INT16|INT32|INT64|FLOAT|DOUBLE|VARCHAR|JSON|FLOAT_VECTOR|SPARSE_FLOAT_VECTOR|ARRAY)$",
-    )
-    is_primary: bool = Field(False, description="是否为主键")
-    auto_id: bool = Field(False, description="是否自动生成主键")
-    max_length: Optional[int] = Field(None, description="VARCHAR 最大长度")
-    enable_analyzer: Optional[bool] = Field(None, description="启用文本分析器（BM25 需要）")
-    enable_match: Optional[bool] = Field(None, description="启用文本匹配（BM25 需要）")
-    dim: Optional[int] = Field(None, description="FLOAT_VECTOR 维度")
-    element_type: Optional[str] = Field(None, description="ARRAY 元素类型")
-    max_capacity: Optional[int] = Field(None, description="ARRAY 最大容量")
-    embedding_source: Optional[str] = Field(None, description="FLOAT_VECTOR 字段的嵌入源字段名，如 content、title；不提供则默认嵌入 content")
-    description: str = Field("", description="字段描述")
-
-
 class VectorIndexParams(BaseModel):
     field_name: str = Field("embedding", description="向量字段名")
     index_type: str = Field("IVF_FLAT", description="索引类型：IVF_FLAT, HNSW, FLAT 等")
@@ -95,34 +78,22 @@ class VectorIndexParams(BaseModel):
     )
 
 
-class BM25Config(BaseModel):
-    text_field_name: str = Field("content", description="BM25 输入的 VARCHAR 字段名（须 enable_analyzer=True）")
-    sparse_field_name: str = Field("content_sparse", description="自动创建的 SPARSE_FLOAT_VECTOR 输出字段名")
-    function_name: str = Field("content_bm25", description="BM25 Function 名称")
-
-
 class CreateCollectionRequest(BaseModel):
     dim: Optional[int] = Field(None, description="向量维度，None 则自动从嵌入模型获取")
     drop_if_exists: bool = False
-    enable_bm25: bool = True
     collection_name: Optional[str] = Field(None, description="自定义集合名称，不提供则使用默认值")
-    fields: Optional[List[FieldDefinition]] = Field(None, description="自定义字段列表，不提供则使用默认 RAG 字段")
+    fields: Optional[List[FieldSpec]] = Field(None, description="自定义字段列表，不提供则使用默认 RAG 字段")
     vector_index: Optional[List[VectorIndexParams]] = Field(None, description="向量索引参数列表")
-    bm25_config: Optional[BM25Config] = Field(None, description="BM25 配置，仅在 enable_bm25=True 时生效")
     description: Optional[str] = Field(None, description="集合 schema 描述")
-    embedding_field_name: Optional[str] = Field(None, description="嵌入向量字段名，用于创建索引")
     database: Optional[str] = Field(None, description="指定 Milvus 数据库，不提供则使用当前数据库")
 
 
 class InitCollectionRequest(BaseModel):
     drop_if_exists: bool = False
-    enable_bm25: bool = True
     collection_name: Optional[str] = Field(None, description="自定义集合名称")
-    fields: Optional[List[FieldDefinition]] = Field(None, description="自定义字段列表")
+    fields: Optional[List[FieldSpec]] = Field(None, description="自定义字段列表")
     vector_index: Optional[List[VectorIndexParams]] = Field(None, description="向量索引参数列表")
-    bm25_config: Optional[BM25Config] = Field(None, description="BM25 配置")
     description: Optional[str] = Field(None, description="集合 schema 描述")
-    embedding_field_name: Optional[str] = Field(None, description="嵌入向量字段名")
     database: Optional[str] = Field(None, description="指定 Milvus 数据库，不提供则使用当前数据库")
 
 
@@ -148,35 +119,27 @@ class BM25SupportResponse(BaseModel):
 # ─── Search ───
 
 
-class SearchRequest(BaseModel):
-    query: str
-    top_k: int = Field(10, gt=0)
-    filter_expr: Optional[str] = None
-    offset: int = Field(0, ge=0)
-    output_fields: Optional[List[str]] = None
-    collection_names: Optional[List[str]] = Field(None, description="要检索的集合列表，不提供则使用默认集合")
-    database: Optional[str] = Field(None, description="指定 Milvus 数据库，不提供则使用当前数据库")
-    anns_field: Optional[str] = Field(None, description="要检索的向量字段名，不提供则使用 profile 中的 embedding_field")
-
-
 class AnnsFieldWeight(BaseModel):
     field: str = Field(..., description="向量字段名")
-    weight: float = Field(..., gt=0, description="该字段的检索权重")
+    weight: float = Field(..., ge=0, description="该字段的检索权重，0 表示不参与排序")
+
+
+class BM25FieldWeight(BaseModel):
+    field: str = Field(..., description="BM25 文本字段名（如 content、file_name）")
+    weight: float = Field(..., ge=0, description="该字段的检索权重，0 表示不参与排序")
 
 
 class HybridSearchRequest(BaseModel):
     query: str
     top_k: int = Field(10, gt=0)
     filter_expr: Optional[str] = None
-    vector_weight: float = Field(0.7, gt=0)
-    bm25_weight: float = Field(0.3, gt=0)
     reranker: str = Field("weighted", pattern=r"^(weighted|rrf)$")
     rrf_k: int = Field(60, gt=0)
     output_fields: Optional[List[str]] = None
     collection_names: Optional[List[str]] = Field(None, description="要检索的集合列表，不提供则使用默认集合")
     database: Optional[str] = Field(None, description="指定 Milvus 数据库，不提供则使用当前数据库")
-    anns_field: Optional[str] = Field(None, description="要检索的向量字段名，不提供则使用 profile 中的 embedding_field")
-    anns_fields: Optional[List[AnnsFieldWeight]] = Field(None, description="多向量字段检索配置，每项指定字段名和权重；提供时忽略 anns_field 和 vector_weight")
+    anns_fields: Optional[List[AnnsFieldWeight]] = Field(None, description="向量字段检索配置，每项指定字段名和权重；不提供则使用 profile 中所有 FLOAT_VECTOR 字段均分权重")
+    bm25_fields: Optional[List[BM25FieldWeight]] = Field(None, description="BM25字段检索配置，每项指定字段名和权重；不提供则使用 profile 中所有 enable_bm25 字段均分权重")
 
 
 class QueryRequest(BaseModel):
@@ -252,3 +215,35 @@ class CountResponse(BaseModel):
 
 class DeleteResponse(BaseModel):
     deleted_count: int
+
+
+# ─── Chat ───
+
+
+class SourceCitation(BaseModel):
+    index: int = Field(..., description="引用编号，从1开始")
+    chunk_id: str = Field(..., description="文档块ID")
+    source_file: str = Field(..., description="源文件路径")
+    score: float = Field(..., description="检索相关度分数")
+    content: str = Field(..., description="文档块内容摘要")
+
+
+class ChatRequest(BaseModel):
+    query: str = Field(..., min_length=1, description="用户问题")
+    conversation_id: Optional[str] = Field(None, description="对话ID，不提供则创建新对话")
+    top_k: int = Field(5, gt=0, description="检索返回的文档数量")
+    collection_names: Optional[List[str]] = Field(None, description="检索的集合列表")
+
+
+class ChatResponse(BaseModel):
+    answer: str
+    sources: List[SourceCitation]
+    conversation_id: str
+
+
+class ConversationResponse(BaseModel):
+    id: str
+    title: Optional[str] = None
+    created_at: float
+    message_count: int
+    messages: Optional[List[Dict[str, Any]]] = None

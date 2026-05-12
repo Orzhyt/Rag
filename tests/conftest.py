@@ -45,7 +45,7 @@ def milvus_client():
 def milvus_service(milvus_client, embedder):
     """组合 client + embedder 的 MilvusService，自动初始化和清理"""
     service = MilvusService(client=milvus_client, embedder=embedder)
-    service.init_collection(drop_if_exists=True, enable_bm25=True)
+    service.init_collection(drop_if_exists=True)
     yield service
     # 清理：释放集合
     try:
