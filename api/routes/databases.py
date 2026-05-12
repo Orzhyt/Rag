@@ -1,14 +1,16 @@
 from fastapi import APIRouter, Depends
 
-from api.deps import get_milvus_client
+from api.deps import get_milvus_client, get_milvus_service
 from api.schemas import (
     CreateDatabaseRequest,
     DropDatabaseRequest,
     ListDatabasesResponse,
     MessageResponse,
+    TruncateDatabaseRequest,
     UsingDatabaseRequest,
 )
 from milvus.client import MilvusClient
+from retrieval.service import MilvusService
 
 router = APIRouter()
 
@@ -44,3 +46,22 @@ def using_database(
 ):
     client.using_database(req.db_name)
     return MessageResponse(message=f"Switched to database '{req.db_name}'")
+
+
+@router.post("/truncate", response_model=MessageResponse)
+def truncate_database(
+    req: TruncateDatabaseRequest,
+    service: MilvusService = Depends(get_milvus_service),
+):
+    original_db = service.client.database
+    service.client.using_database(req.database)
+    try:
+        collections = service.client.list_collections()
+        total_deleted = 0
+        for col_name in collections:
+            total_deleted += service.truncate_collection(collection_name=col_name)
+    finally:
+        service.client.using_database(original_db)
+    return MessageResponse(
+        message=f"Truncated database '{req.database}': {len(collections)} collections, {total_deleted} rows deleted"
+    )

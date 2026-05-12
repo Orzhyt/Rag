@@ -4,19 +4,12 @@ from api.deps import get_milvus_service
 from api.schemas import (
     CountRequest,
     CountResponse,
-    DeleteByChunkIdsRequest,
-    DeleteByFieldRequest,
-    DeleteBySourceRequest,
-    DeleteResponse,
     HybridSearchRequest,
-    MessageResponse,
     QueryRequest,
     QueryResponse,
     SearchRequest,
     SearchResponse,
     SearchResultItem,
-    TruncateCollectionsRequest,
-    TruncateDatabaseRequest,
 )
 from retrieval.service import MilvusService, SearchResult
 
@@ -141,98 +134,3 @@ def count(
             service.client.using_database(original_db)
 
     return CountResponse(count=n)
-
-
-@router.post("/delete/chunk-ids", response_model=DeleteResponse)
-def delete_by_chunk_ids(
-    req: DeleteByChunkIdsRequest,
-    service: MilvusService = Depends(get_milvus_service),
-):
-    original_db = None
-    if req.database:
-        original_db = service.client.database
-        service.client.using_database(req.database)
-    try:
-        n = service.delete_by_chunk_ids(req.chunk_ids, collection_name=req.collection_name)
-    finally:
-        if original_db is not None:
-            service.client.using_database(original_db)
-    return DeleteResponse(deleted_count=n)
-
-
-@router.post("/delete/source", response_model=DeleteResponse)
-def delete_by_source(
-    req: DeleteBySourceRequest,
-    service: MilvusService = Depends(get_milvus_service),
-):
-    original_db = None
-    if req.database:
-        original_db = service.client.database
-        service.client.using_database(req.database)
-    try:
-        n = service.delete_by_source(req.source_file, collection_name=req.collection_name)
-    finally:
-        if original_db is not None:
-            service.client.using_database(original_db)
-    return DeleteResponse(deleted_count=n)
-
-
-@router.post("/delete/field", response_model=DeleteResponse)
-def delete_by_field(
-    req: DeleteByFieldRequest,
-    service: MilvusService = Depends(get_milvus_service),
-):
-    original_db = None
-    if req.database:
-        original_db = service.client.database
-        service.client.using_database(req.database)
-    try:
-        n = service.delete_by_field(
-            field_name=req.field_name,
-            field_value=req.field_value,
-            collection_name=req.collection_name,
-        )
-    finally:
-        if original_db is not None:
-            service.client.using_database(original_db)
-    return DeleteResponse(deleted_count=n)
-
-
-@router.post("/truncate/collections", response_model=MessageResponse)
-def truncate_collections(
-    req: TruncateCollectionsRequest,
-    service: MilvusService = Depends(get_milvus_service),
-):
-    original_db = None
-    if req.database:
-        original_db = service.client.database
-        service.client.using_database(req.database)
-    try:
-        total_deleted = 0
-        for col_name in req.collection_names:
-            total_deleted += service.truncate_collection(collection_name=col_name)
-    finally:
-        if original_db is not None:
-            service.client.using_database(original_db)
-    return MessageResponse(
-        message=f"Truncated {len(req.collection_names)} collections, total {total_deleted} rows deleted"
-    )
-
-
-@router.post("/truncate/database", response_model=MessageResponse)
-def truncate_database(
-    req: TruncateDatabaseRequest,
-    service: MilvusService = Depends(get_milvus_service),
-):
-    original_db = service.client.database
-    service.client.using_database(req.database)
-    try:
-        collections = service.client.list_collections()
-        total_deleted = 0
-        for col_name in collections:
-            total_deleted += service.truncate_collection(collection_name=col_name)
-    finally:
-        service.client.using_database(original_db)
-    return MessageResponse(
-        message=f"Truncated database '{req.database}': {len(collections)} collections, {total_deleted} rows deleted"
-    )

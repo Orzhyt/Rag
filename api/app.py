@@ -7,7 +7,7 @@ from pymilvus.exceptions import MilvusException
 
 from api.deps import cleanup_singletons, init_singletons
 from api.schemas import ErrorResponse
-from api.routes import collections, databases, health, ingestion, search
+from api.routes import collections, databases, data, health, search
 from common.logger import setup_logger
 
 logger = setup_logger("api.app")
@@ -78,7 +78,7 @@ async def generic_error_handler(request: Request, exc: Exception):
 # ─── Routers ───
 
 app.include_router(health.router, prefix="/health", tags=["Health"])
-app.include_router(ingestion.router, prefix="/api/v1/ingestion", tags=["Ingestion"])
+app.include_router(data.router, prefix="/api/v1/data", tags=["Data"])
 app.include_router(databases.router, prefix="/api/v1/databases", tags=["Databases"])
 app.include_router(collections.router, prefix="/api/v1/collections", tags=["Collections"])
 app.include_router(search.router, prefix="/api/v1/search", tags=["Search"])

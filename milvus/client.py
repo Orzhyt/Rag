@@ -504,19 +504,26 @@ class MilvusClient:
             self._client.load_collection(col_name)
         except Exception:
             pass
-        # 获取主键字段
+        # 获取主键字段及其类型
         info = self._client.describe_collection(col_name)
         pk_field = None
+        pk_type = None
         for f in info.get("fields", []):
             if f.get("is_primary", False):
                 pk_field = f["name"]
+                pk_type = f.get("type", "")
                 break
         if pk_field is None:
             raise ValueError(f"Cannot find primary key field in collection '{col_name}'")
+        # 根据主键类型生成删除过滤表达式
+        if pk_type == DataType.INT64:
+            filter_expr = f"{pk_field} >= 0"
+        else:
+            filter_expr = f'{pk_field} != ""'
         # 按主键删除全部数据
         result = self._client.delete(
             collection_name=col_name,
-            filter=f'{pk_field} != ""',
+            filter=filter_expr,
         )
         self._client.flush(col_name)
         deleted = result.get("delete_count", 0) if isinstance(result, dict) else 0

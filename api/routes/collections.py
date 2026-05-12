@@ -12,6 +12,7 @@ from api.schemas import (
     FieldDefinition,
     InitCollectionRequest,
     MessageResponse,
+    TruncateCollectionsRequest,
     VectorIndexParams,
 )
 from milvus.client import MilvusClient, build_field_schema
@@ -212,3 +213,24 @@ def drop_collection(
     effective_name = req.collection_name or client.collection_name
     client.drop_collection(collection_name=req.collection_name, database=req.database)
     return MessageResponse(message=f"Collection '{effective_name}' dropped")
+
+
+@router.post("/truncate", response_model=MessageResponse)
+def truncate_collections(
+    req: TruncateCollectionsRequest,
+    service: MilvusService = Depends(get_milvus_service),
+):
+    original_db = None
+    if req.database:
+        original_db = service.client.database
+        service.client.using_database(req.database)
+    try:
+        total_deleted = 0
+        for col_name in req.collection_names:
+            total_deleted += service.truncate_collection(collection_name=col_name)
+    finally:
+        if original_db is not None:
+            service.client.using_database(original_db)
+    return MessageResponse(
+        message=f"Truncated {len(req.collection_names)} collections, total {total_deleted} rows deleted"
+    )
