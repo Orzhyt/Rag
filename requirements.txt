@@ -9,7 +9,7 @@ python-dotenv==1.0.1
 # Embeddings (>=2.7 兼容新版 huggingface-hub)
 sentence-transformers>=3.3.0
 transformers>=4.51.0
-# GPU 用户请根据cuda版本（nvidia-smi）改用: pip install torch --index-url https://mirrors.nju.edu.cn/pytorch/whl/cu128
+# GPU 用户请根据cuda版本（nvidia-smi）改用: pip install torch --find-links https://mirrors.aliyun.com/pytorch-wheels/cu130
 # 昇腾 NPU 用户请额外安装: pip install torch_npu
 torch>=2.5.0
 
