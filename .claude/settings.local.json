@@ -31,7 +31,13 @@
       "Bash(npm install *)",
       "Bash(npx tsc *)",
       "Bash(npm run *)",
-      "Bash(pip freeze *)"
+      "Bash(pip freeze *)",
+      "Bash(where python *)",
+      "Bash(python3 -c \"import ragas; print\\(ragas.__file__\\)\")",
+      "Bash(echo \"exit:$?\")",
+      "Bash(antiword *)",
+      "WebFetch(domain:docs.ragas.org.cn)",
+      "WebFetch(domain:docs.ragas.org)"
     ]
   }
 }
