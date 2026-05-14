@@ -37,7 +37,9 @@
       "Bash(echo \"exit:$?\")",
       "Bash(antiword *)",
       "WebFetch(domain:docs.ragas.org.cn)",
-      "WebFetch(domain:docs.ragas.org)"
+      "WebFetch(domain:docs.ragas.org)",
+      "WebFetch(domain:developer.aliyun.com)",
+      "WebFetch(domain:github.com)"
     ]
   }
 }

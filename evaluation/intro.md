@@ -1,3 +1,8 @@
+# 启动评估命令（项目根目录执行）
+python -m evaluation.runner --mode evaluate --dataset evaluation/generated_testset.jsonl --metrics faithfulness,answer_relevancy,context_precision,context_recall --collections cjc_test
+# 自动创建评估集命令（项目根目录执行）
+python -m evaluation.runner --mode generate --data-dir data --testset-size 20 --output evaluation/generated_testset.jsonl
+
 # RAG 评估指标说明
 
 ## Faithfulness（忠实度）

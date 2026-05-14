@@ -155,14 +155,122 @@ async def run_evaluation(
     return all_results
 
 
+async def run_generate(
+    data_dir: Optional[str] = None,
+    from_milvus: bool = False,
+    collection_names: Optional[List[str]] = None,
+    testset_size: int = 10,
+    output_path: str = "evaluation/generated_testset.jsonl",
+):
+    """生成测试集主流程"""
+    from evaluation.testset_generator import (
+        generate_testset,
+        generate_testset_from_chunks,
+        load_chunks_from_milvus,
+        load_documents_from_dir,
+        save_testset_to_jsonl,
+    )
+
+    # 1. 加载文档或切片
+    if from_milvus:
+        milvus_service, embedder = init_services()
+        documents = load_chunks_from_milvus(milvus_service, collection_names)
+    elif data_dir:
+        documents = load_documents_from_dir(data_dir)
+        embedder = None
+    else:
+        raise ValueError("必须指定 --data-dir 或 --from-milvus")
+
+    if not documents:
+        logger.error("没有可用的文档/切片，无法生成测试集")
+        return
+
+    # 2. 配置 ragas LLM 和 Embeddings
+    if embedder is None:
+        logger.info("Loading embedding model for testset generation...")
+        embedder = EmbeddingModel()
+        _ = embedder.dim
+
+    ragas_llm = get_ragas_llm()
+    ragas_embeddings = get_ragas_embeddings(embedder)
+
+    # 3. 生成测试集
+    if from_milvus:
+        testset = generate_testset_from_chunks(
+            chunks=documents,
+            testset_size=testset_size,
+            ragas_llm=ragas_llm,
+            ragas_embeddings=ragas_embeddings,
+        )
+    else:
+        testset = generate_testset(
+            documents=documents,
+            testset_size=testset_size,
+            ragas_llm=ragas_llm,
+            ragas_embeddings=ragas_embeddings,
+        )
+
+    # 4. 保存
+    saved_path = save_testset_to_jsonl(testset, output_path)
+    print(f"\n测试集已保存到: {saved_path}（{len(testset.samples)} 条）")
+    return saved_path
+
+
+async def run_generate_and_eval(
+    data_dir: Optional[str] = None,
+    from_milvus: bool = False,
+    collection_names: Optional[List[str]] = None,
+    testset_size: int = 10,
+    metrics: Optional[List[str]] = None,
+    top_k: int = 5,
+    search_mode: str = "hybrid",
+    output_dir: str = "evaluation/results",
+):
+    """生成测试集 + 评估一条龙"""
+    metrics = metrics or ["faithfulness", "answer_relevancy"]
+
+    # 1. 生成测试集
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    testset_path = f"evaluation/generated_testset_{timestamp}.jsonl"
+
+    result = await run_generate(
+        data_dir=data_dir,
+        from_milvus=from_milvus,
+        collection_names=collection_names,
+        testset_size=testset_size,
+        output_path=testset_path,
+    )
+    if result is None:
+        logger.error("测试集生成失败，跳过评估")
+        return
+
+    # 2. 执行评估
+    await run_evaluation(
+        dataset_path=testset_path,
+        metrics=metrics,
+        top_k=top_k,
+        search_mode=search_mode,
+        output_dir=output_dir,
+        collection_names=collection_names,
+    )
+
+
 def main():
     parser = argparse.ArgumentParser(description="RAG Evaluation with ragas")
     parser.add_argument(
-        "--dataset", required=True,
-        help="Path to test dataset JSONL file",
+        "--mode",
+        default="evaluate",
+        choices=["evaluate", "generate", "generate_and_eval"],
+        help="运行模式: evaluate=评估(默认), generate=生成测试集, generate_and_eval=生成+评估",
+    )
+
+    # 评估模式参数
+    parser.add_argument(
+        "--dataset",
+        help="Path to test dataset JSONL file (evaluate 模式必填)",
     )
     parser.add_argument(
-        "--metrics", required=True,
+        "--metrics",
         help="Comma-separated metric names: faithfulness,answer_relevancy,context_precision,context_recall",
     )
     parser.add_argument("--top-k", type=int, default=5, help="Number of documents to retrieve")
@@ -176,18 +284,67 @@ def main():
         help="Comma-separated collection names to search (default: use MilvusClient default)",
     )
 
+    # 生成模式参数
+    parser.add_argument(
+        "--data-dir", default=None,
+        help="文档目录路径（generate 模式: 从原始文档生成测试集）",
+    )
+    parser.add_argument(
+        "--from-milvus", action="store_true",
+        help="从 Milvus 已有切片生成测试集（generate 模式）",
+    )
+    parser.add_argument(
+        "--testset-size", type=int, default=10,
+        help="生成测试样本数量（generate 模式，默认 10）",
+    )
+    parser.add_argument(
+        "--output", default="evaluation/generated_testset.jsonl",
+        help="生成测试集的输出 JSONL 路径",
+    )
+
     args = parser.parse_args()
-    metrics = [m.strip() for m in args.metrics.split(",")]
     collection_names = [c.strip() for c in args.collections.split(",")] if args.collections else None
 
-    asyncio.run(run_evaluation(
-        dataset_path=args.dataset,
-        metrics=metrics,
-        top_k=args.top_k,
-        search_mode=args.search_mode,
-        output_dir=args.output_dir,
-        collection_names=collection_names,
-    ))
+    if args.mode == "evaluate":
+        if not args.dataset:
+            parser.error("evaluate 模式需要 --dataset 参数")
+        if not args.metrics:
+            parser.error("evaluate 模式需要 --metrics 参数")
+        metrics = [m.strip() for m in args.metrics.split(",")]
+        asyncio.run(run_evaluation(
+            dataset_path=args.dataset,
+            metrics=metrics,
+            top_k=args.top_k,
+            search_mode=args.search_mode,
+            output_dir=args.output_dir,
+            collection_names=collection_names,
+        ))
+
+    elif args.mode == "generate":
+        if not args.data_dir and not args.from_milvus:
+            parser.error("generate 模式需要 --data-dir 或 --from-milvus 参数")
+        asyncio.run(run_generate(
+            data_dir=args.data_dir,
+            from_milvus=args.from_milvus,
+            collection_names=collection_names,
+            testset_size=args.testset_size,
+            output_path=args.output,
+        ))
+
+    elif args.mode == "generate_and_eval":
+        if not args.data_dir and not args.from_milvus:
+            parser.error("generate_and_eval 模式需要 --data-dir 或 --from-milvus 参数")
+        metrics = [m.strip() for m in args.metrics.split(",")] if args.metrics else None
+        asyncio.run(run_generate_and_eval(
+            data_dir=args.data_dir,
+            from_milvus=args.from_milvus,
+            collection_names=collection_names,
+            testset_size=args.testset_size,
+            metrics=metrics,
+            top_k=args.top_k,
+            search_mode=args.search_mode,
+            output_dir=args.output_dir,
+        ))
 
 
 if __name__ == "__main__":

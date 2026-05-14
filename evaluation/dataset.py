@@ -1,10 +1,13 @@
 import json
+import logging
 from pathlib import Path
 from typing import Dict, List, Optional
 
 from ragas.dataset_schema import EvaluationDataset, SingleTurnSample
 
 from evaluation.rag_pipeline import RAGPipeline
+
+logger = logging.getLogger("evaluation.dataset")
 
 
 def load_dataset(path: str) -> List[Dict]:
@@ -34,11 +37,13 @@ def build_eval_dataset(
     reference 和 reference_contexts 从 records 中直接取。
     """
     samples = []
-    for rec in records:
+    for i, rec in enumerate(records):
         query = rec["user_input"]
+        logger.info("Query %d/%d: %s", i + 1, len(records), query[:50])
         answer, contexts = pipeline.invoke(
             query, top_k=top_k, mode=mode, collection_names=collection_names,
         )
+        logger.info("Query %d/%d done (retrieved %d contexts)", i + 1, len(records), len(contexts))
 
         sample = SingleTurnSample(
             user_input=query,
