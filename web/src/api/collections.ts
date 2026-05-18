@@ -9,7 +9,7 @@ export async function listCollections(database?: string): Promise<string[]> {
   const { data } = await apiClient.get<string[]>('/collections', {
     params: database ? { database } : undefined,
   });
-  return data;
+  return data.sort();
 }
 
 export async function createCollection(req: CreateCollectionRequest): Promise<void> {

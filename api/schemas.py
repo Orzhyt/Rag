@@ -35,7 +35,7 @@ class IngestRequest(BaseModel):
     folder_path: str = Field(..., description="入库文件夹绝对路径")
     chunk_size: int = Field(500, gt=0, description="分块大小（字符数）")
     chunk_overlap: int = Field(50, ge=0, description="分块重叠字符数")
-    upsert_mode: bool = Field(True, description="True=upsert 覆盖, False=insert 新增")
+    upsert_mode: bool = Field(False, description="True=upsert 覆盖, False=insert 新增")
     collection_name: Optional[str] = Field(None, description="目标集合名称，不提供则使用默认值")
     database: Optional[str] = Field(None, description="指定 Milvus 数据库，不提供则使用当前数据库")
 
@@ -226,6 +226,7 @@ class SourceCitation(BaseModel):
     source_file: str = Field(..., description="源文件路径")
     score: float = Field(..., description="检索相关度分数")
     content: str = Field(..., description="文档块内容摘要")
+    fields: Dict[str, Any] = Field(default_factory=dict, description="完整检索字段")
 
 
 class ChatRequest(BaseModel):

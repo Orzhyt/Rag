@@ -81,6 +81,7 @@ class RAGChatService:
                 "source_file": r.source_file,
                 "score": round(r.score, 4),
                 "content": r.content[:200] + "..." if len(r.content) > 200 else r.content,
+                "fields": r.fields,
             })
         return sources
 

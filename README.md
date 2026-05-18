@@ -24,27 +24,22 @@ rag_project/
 ## Quick Start
 
 ### 1. 环境配置
-
-```bash
-cp .env.example .env
-# 编辑 .env，填入 Milvus、Embedding 模型、LLM API 等配置
-```
+编辑 .env，填入 Milvus、Embedding 模型、LLM API 等配置
 
 ### 2. 后端启动
 
 ```bash
 # 安装 Python 依赖
-pip install -e .
+pip install -r ./requirements.txt
 
 # 启动 API 服务（默认 0.0.0.0:8000）
 python main.py
 ```
 
-启动后访问 http://localhost:8000/docs 查看 API 文档。
+启动后可以访问 http://localhost:8000/docs 查看 API 文档。
 
 ### 3. 前端启动
-
-**开发模式**（前后端分别运行，Vite 代理 API 请求到后端）：
+（前后端分别运行，Vite 代理 API 请求到后端）：
 
 ```bash
 cd web

@@ -1,7 +1,7 @@
-import { Card, Tag, Typography, Progress } from 'antd';
+import { Card, Tag, Typography, Collapse } from 'antd';
 import type { SearchHit } from '../../api/types';
 
-const { Text, Paragraph } = Typography;
+const { Text } = Typography;
 
 interface Props {
   hit: SearchHit;
@@ -9,9 +9,8 @@ interface Props {
 }
 
 export default function SearchResultCard({ hit, index }: Props) {
-  const scorePercent = Math.min(Math.round(hit.score * 100), 100);
   const sourceFile = (hit.source_file || hit.file_name || '') as string;
-  const content = (hit.content || '') as string;
+  const { score, ...rest } = hit;
 
   return (
     <Card
@@ -20,28 +19,28 @@ export default function SearchResultCard({ hit, index }: Props) {
       title={
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <Tag color="blue">#{index + 1}</Tag>
-          <Text ellipsis style={{ maxWidth: 300, fontSize: 13 }}>
+          <Text ellipsis style={{ flex: 1, minWidth: 0, fontSize: 13 }}>
             {sourceFile}
           </Text>
         </div>
       }
-      extra={
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <Progress
-            percent={scorePercent}
-            size="small"
-            style={{ width: 60 }}
-            format={() => `${hit.score.toFixed(4)}`}
-          />
-        </div>
-      }
+      extra={<Text type="secondary" style={{ fontSize: 12 }}>{hit.score.toFixed(4)}</Text>}
     >
-      <Paragraph
-        ellipsis={{ rows: 3, expandable: true, symbol: '展开' }}
-        style={{ fontSize: 13, margin: 0 }}
-      >
-        {content}
-      </Paragraph>
+      <Collapse
+        size="small"
+        bordered={false}
+        defaultActiveKey={['json']}
+        style={{ background: 'transparent' }}
+        items={[{
+          key: 'json',
+          label: <Text style={{ fontSize: 12, color: '#999' }}>完整数据</Text>,
+          children: (
+            <pre style={{ fontSize: 12, margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', background: '#fafafa', padding: 8, borderRadius: 4 }}>
+              {JSON.stringify(rest, null, 2)}
+            </pre>
+          ),
+        }]}
+      />
     </Card>
   );
 }

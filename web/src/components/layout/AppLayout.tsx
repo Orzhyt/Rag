@@ -3,6 +3,7 @@ import {
   MessageOutlined,
   SearchOutlined,
   CloudUploadOutlined,
+  DatabaseOutlined,
 } from '@ant-design/icons';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 
@@ -11,6 +12,7 @@ const { Sider, Content } = Layout;
 const menuItems = [
   { key: '/', icon: <MessageOutlined />, label: 'RAG 对话' },
   { key: '/search', icon: <SearchOutlined />, label: '知识库检索' },
+  { key: '/manage', icon: <DatabaseOutlined />, label: '向量库管理' },
   { key: '/ingest', icon: <CloudUploadOutlined />, label: '数据入库' },
 ];
 

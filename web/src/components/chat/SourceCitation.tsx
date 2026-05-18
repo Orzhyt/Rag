@@ -1,7 +1,7 @@
 import { Collapse, Tag, Typography, Space, Tooltip } from 'antd';
 import type { SourceCitation as SourceCitationType } from '../../api/types';
 
-const { Text, Paragraph } = Typography;
+const { Text } = Typography;
 
 interface Props {
   sources: SourceCitationType[];
@@ -26,9 +26,9 @@ export default function SourceCitation({ sources }: Props) {
       </Space>
     ),
     children: (
-      <Paragraph style={{ fontSize: 13, margin: 0, color: '#555' }}>
-        {s.content}
-      </Paragraph>
+      <pre style={{ fontSize: 12, margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', background: '#fafafa', padding: 8, borderRadius: 4 }}>
+        {JSON.stringify(s.fields || {}, null, 2)}
+      </pre>
     ),
   }));
 

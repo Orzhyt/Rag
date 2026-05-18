@@ -1,9 +1,11 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
-  Form, Input, InputNumber, Switch, Button, Typography, message, Space, Card, Statistic,
+  Form, Input, InputNumber, Button, Typography, message, Space, Card, Statistic, Select, Spin,
 } from 'antd';
 import { UploadOutlined } from '@ant-design/icons';
 import { ingestData } from '../../api/data';
+import { listDatabases } from '../../api/databases';
+import { listCollections } from '../../api/collections';
 import type { IngestResponse } from '../../api/types';
 
 const { Title } = Typography;
@@ -12,6 +14,37 @@ export default function IngestView() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<IngestResponse | null>(null);
   const [form] = Form.useForm();
+
+  const [databases, setDatabases] = useState<string[]>([]);
+  const [collections, setCollections] = useState<string[]>([]);
+  const [selectedDatabase, setSelectedDatabase] = useState<string | undefined>();
+  const [dbLoading, setDbLoading] = useState(false);
+  const [colLoading, setColLoading] = useState(false);
+
+  useEffect(() => {
+    setDbLoading(true);
+    listDatabases()
+      .then((dbs) => {
+        setDatabases(dbs);
+        if (dbs.length > 0 && !selectedDatabase) {
+          setSelectedDatabase(dbs[0]);
+        }
+      })
+      .catch(() => message.error('获取数据库列表失败'))
+      .finally(() => setDbLoading(false));
+  }, []);
+
+  useEffect(() => {
+    if (!selectedDatabase) {
+      setCollections([]);
+      return;
+    }
+    setColLoading(true);
+    listCollections(selectedDatabase)
+      .then(setCollections)
+      .catch(() => message.error('获取集合列表失败'))
+      .finally(() => setColLoading(false));
+  }, [selectedDatabase]);
 
   const handleIngest = async () => {
     try {
@@ -22,8 +55,8 @@ export default function IngestView() {
         folder_path: values.folder_path,
         chunk_size: values.chunk_size,
         chunk_overlap: values.chunk_overlap,
-        upsert_mode: values.upsert_mode,
         collection_name: values.collection_name || undefined,
+        database: selectedDatabase,
       });
       setResult(resp);
       message.success(`入库成功：${resp.chunks_inserted} 条`);
@@ -42,8 +75,32 @@ export default function IngestView() {
         <Form form={form} layout="vertical" initialValues={{
           chunk_size: 500,
           chunk_overlap: 50,
-          upsert_mode: true,
         }}>
+          <Space style={{ width: '100%' }} size={16}>
+            <Form.Item label="数据库" style={{ width: 200 }}>
+              <Select
+                value={selectedDatabase}
+                onChange={setSelectedDatabase}
+                loading={dbLoading}
+                style={{ width: '100%' }}
+                placeholder="选择数据库"
+                options={databases.map((db) => ({ label: db, value: db }))}
+              />
+            </Form.Item>
+            <Form.Item name="collection_name" label="目标集合" style={{ width: 200 }}>
+              {colLoading ? (
+                <Spin size="small" />
+              ) : (
+                <Select
+                  style={{ width: '100%' }}
+                  placeholder="不填则使用默认集合"
+                  options={collections.map((c) => ({ label: c, value: c }))}
+                  allowClear
+                />
+              )}
+            </Form.Item>
+          </Space>
+
           <Form.Item
             name="folder_path"
             label="文件夹路径"
@@ -60,14 +117,6 @@ export default function IngestView() {
               <InputNumber min={0} max={500} />
             </Form.Item>
           </Space>
-
-          <Form.Item name="upsert_mode" label="覆盖模式" valuePropName="checked">
-            <Switch checkedChildren="Upsert" unCheckedChildren="Insert" />
-          </Form.Item>
-
-          <Form.Item name="collection_name" label="目标集合（可选）">
-            <Input placeholder="不填则使用默认集合" />
-          </Form.Item>
 
           <Form.Item>
             <Button

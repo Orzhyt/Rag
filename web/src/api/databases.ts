@@ -3,13 +3,13 @@ import type { ListDatabasesResponse, CreateDatabaseRequest, DropDatabaseRequest 
 
 export async function listDatabases(): Promise<string[]> {
   const { data } = await apiClient.get<ListDatabasesResponse>('/databases');
-  return data.databases;
+  return data.databases.sort();
 }
 
 export async function createDatabase(req: CreateDatabaseRequest): Promise<void> {
-  await apiClient.post('/databases/create', req);
+  await apiClient.post('/databases', req);
 }
 
 export async function dropDatabase(req: DropDatabaseRequest): Promise<void> {
-  await apiClient.post('/databases/drop', req);
+  await apiClient.delete('/databases', { data: req });
 }

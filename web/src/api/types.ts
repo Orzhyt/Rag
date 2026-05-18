@@ -72,6 +72,11 @@ export interface IngestResponse {
 
 // ─── Search ───
 
+export interface FieldWeight {
+  field: string;
+  weight: number;
+}
+
 export interface SearchRequest {
   query: string;
   top_k?: number;
@@ -79,11 +84,8 @@ export interface SearchRequest {
   output_fields?: string[];
   collection_names?: string[];
   database?: string;
-}
-
-export interface HybridSearchRequest extends SearchRequest {
-  vector_weight?: number;
-  bm25_weight?: number;
+  anns_fields?: FieldWeight[];
+  bm25_fields?: FieldWeight[];
   reranker?: 'weighted' | 'rrf';
 }
 
@@ -105,6 +107,7 @@ export interface SourceCitation {
   source_file: string;
   score: number;
   content: string;
+  fields?: Record<string, unknown>;
 }
 
 export interface ChatRequest {

@@ -1,12 +1,7 @@
 import apiClient from './client';
-import type { SearchRequest, HybridSearchRequest, SearchResponse } from './types';
+import type { SearchRequest, SearchResponse } from './types';
 
-export async function vectorSearch(req: SearchRequest): Promise<SearchResponse> {
-  const { data } = await apiClient.post<SearchResponse>('/search/vector', req);
-  return data;
-}
-
-export async function hybridSearch(req: HybridSearchRequest): Promise<SearchResponse> {
+export async function hybridSearch(req: SearchRequest): Promise<SearchResponse> {
   const { data } = await apiClient.post<SearchResponse>('/search/hybrid', req);
   return data;
 }
