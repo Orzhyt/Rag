@@ -26,6 +26,30 @@ def _switch_db(client: MilvusClient, database: Optional[str]):
         client.using_database(database)
 
 
+@router.get("", response_model=list[str])
+def list_collections(
+    database: Optional[str] = Query(None),
+    client: MilvusClient = Depends(get_milvus_client),
+):
+    _switch_db(client, database)
+    return client.list_collections()
+
+
+@router.get("/{collection_name}/schema", response_model=DescribeCollectionResponse)
+def get_collection_schema(
+    collection_name: str,
+    database: Optional[str] = Query(None),
+    client: MilvusClient = Depends(get_milvus_client),
+):
+    _switch_db(client, database)
+    info = client.describe_collection(collection_name)
+    return DescribeCollectionResponse(
+        name=info.get("name", collection_name),
+        description=info.get("description", ""),
+        fields=info.get("fields", []),
+    )
+
+
 @router.get("/exists", response_model=CollectionExistsResponse)
 def collection_exists(
     collection_name: Optional[str] = Query(None),

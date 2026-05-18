@@ -233,6 +233,7 @@ class ChatRequest(BaseModel):
     conversation_id: Optional[str] = Field(None, description="对话ID，不提供则创建新对话")
     top_k: int = Field(5, gt=0, description="检索返回的文档数量")
     collection_names: Optional[List[str]] = Field(None, description="检索的集合列表")
+    database: Optional[str] = Field(None, description="指定 Milvus 数据库，不提供则使用当前数据库")
 
 
 class ChatResponse(BaseModel):
