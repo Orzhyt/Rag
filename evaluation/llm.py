@@ -5,13 +5,13 @@ from openai import AsyncOpenAI
 from ragas.embeddings.base import BaseRagasEmbedding
 from ragas.llms import llm_factory
 
-from milvus.embedder import EmbeddingModel
+from retrieval.embedder import Embedder
 
 
 class LocalEmbedding(BaseRagasEmbedding):
     """包装现有 EmbeddingModel，适配 ragas 0.4.x 的 BaseRagasEmbedding 接口"""
 
-    def __init__(self, embedder: EmbeddingModel, cache: Any = None):
+    def __init__(self, embedder: Embedder, cache: Any = None):
         super().__init__(cache=cache)
         self.embedder = embedder
 
@@ -45,6 +45,6 @@ def get_ragas_llm():
     )
 
 
-def get_ragas_embeddings(embedder: EmbeddingModel) -> LocalEmbedding:
+def get_ragas_embeddings(embedder: Embedder) -> LocalEmbedding:
     """构建 ragas 评估用的 Embeddings，复用已加载的 EmbeddingModel"""
     return LocalEmbedding(embedder)

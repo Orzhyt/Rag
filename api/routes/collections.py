@@ -15,7 +15,7 @@ from api.schemas import (
     VectorIndexParams,
 )
 from milvus.client import MilvusClient
-from milvus.embedder import EmbeddingModel
+from retrieval.embedder import Embedder
 from retrieval.service import MilvusService
 
 router = APIRouter()
@@ -101,7 +101,7 @@ def bm25_support(
 def create_collection(
     req: CreateCollectionRequest,
     client: MilvusClient = Depends(get_milvus_client),
-    embedder: EmbeddingModel = Depends(get_embedder),
+    embedder: Embedder = Depends(get_embedder),
 ):
     _switch_db(client, req.database)
 

@@ -7,8 +7,9 @@ from retrieval.profile import ParsedChunk
 from common.logger import setup_logger
 
 from milvus.client import  MilvusClient
-from milvus.embedder import EmbeddingModel
+from retrieval.embedder import Embedder
 from retrieval.profile import CollectionProfile, DEFAULT_RAG_PROFILE, build_insert_rows
+from retrieval.reranker import Reranker
 
 logger = setup_logger("milvus.service")
 
@@ -66,11 +67,12 @@ class SearchResult:
 class MilvusService:
     """Milvus 数据服务：入库、增量更新、查询、删除"""
 
-    def __init__(self, client: MilvusClient = None, embedder: EmbeddingModel = None,
-                 profile: CollectionProfile = None):
+    def __init__(self, client: MilvusClient = None, embedder: Embedder = None,
+                 profile: CollectionProfile = None, reranker: Reranker = None):
         self.client = client or MilvusClient()
-        self.embedder = embedder or EmbeddingModel()
+        self.embedder = embedder or Embedder()
         self.profile = profile or DEFAULT_RAG_PROFILE
+        self.reranker = reranker
         self._loaded_collections: set = set()
 
     # ------------------------------------------------------------------
@@ -275,6 +277,18 @@ class MilvusService:
                 SearchResult.from_hit(hit, profile=self.profile, collection_name=col_name)
                 for hit in results[0]
             )
+
+        # 神经重排序：在 Milvus 融合排序后，对候选结果进行精排
+        if self.reranker and all_results:
+            documents = [r.content for r in all_results]
+            rerank_results = self.reranker.rerank(query=query, documents=documents, top_n=top_k)
+            reranked = []
+            for rr in rerank_results:
+                result = all_results[rr.index]
+                result.score = rr.relevance_score
+                reranked.append(result)
+            all_results = reranked
+            logger.info("Reranked %d results", len(all_results))
 
         return all_results
 

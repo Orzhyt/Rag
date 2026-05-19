@@ -5,7 +5,8 @@ os.environ.setdefault("TORCHVISION_DISABLE_EXTENSION", "1")
 
 import pytest
 from dotenv import load_dotenv
-from milvus import MilvusClient, EmbeddingModel
+from milvus import MilvusClient
+from retrieval.embedder import Embedder
 from retrieval.service import MilvusService
 
 load_dotenv()
@@ -20,7 +21,7 @@ TEST_COLLECTION = "test_rag_chunks"
 @pytest.fixture(scope="session")
 def embedder():
     """Session 级别的 embedding 模型，只加载一次"""
-    return EmbeddingModel(model_name=EMBEDDING_MODEL_NAME)
+    return Embedder(model_name=EMBEDDING_MODEL_NAME)
 
 
 @pytest.fixture

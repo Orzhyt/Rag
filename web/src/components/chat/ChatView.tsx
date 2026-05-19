@@ -106,7 +106,7 @@ export default function ChatView() {
         (data) => {
           // Don't switch activeConversationId during streaming for new conversations
           // — the local ID is the key in the store. Migration happens in finishStreaming.
-          if (!isNewConv) {
+          if (data.conversation_id ===convId) {
             setActiveConversation(data.conversation_id);
           }
           setStreamingSources(data.sources);

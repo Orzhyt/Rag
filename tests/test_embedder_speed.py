@@ -9,7 +9,7 @@ import pytest
 os.environ.setdefault("TORCHVISION_DISABLE_EXTENSION", "1")
 
 from dotenv import load_dotenv
-from milvus import EmbeddingModel
+from retrieval.embedder import Embedder
 
 load_dotenv()
 
@@ -25,7 +25,7 @@ def _format_time(seconds: float) -> str:
 
 @pytest.fixture(scope="session")
 def embedder(request):
-    return EmbeddingModel(model_name=EMBEDDING_MODEL_NAME, device=DEVICE)
+    return Embedder(model_name=EMBEDDING_MODEL_NAME, device=DEVICE)
 
 
 def test_single_encode_speed(embedder):

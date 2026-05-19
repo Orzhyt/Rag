@@ -17,7 +17,7 @@ export async function createCollection(req: CreateCollectionRequest): Promise<vo
 }
 
 export async function dropCollection(req: DropCollectionRequest): Promise<void> {
-  await apiClient.post('/collections/drop', req);
+  await apiClient.delete('/collections/drop', { data: req });
 }
 
 export async function describeCollection(

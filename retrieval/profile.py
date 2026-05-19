@@ -207,9 +207,13 @@ def build_insert_rows(
     vec_fields: List[tuple] = []
     for f in profile.fields:
         if f.dtype == "FLOAT_VECTOR":
-            source = f.name.replace("_embedding", "").rstrip("_") or "content"
-            if source not in chunk_field_names:
-                source = "content"
+            # 优先使用显式指定的 embedding_source，否则按命名约定推导
+            if f.embedding_source and f.embedding_source in chunk_field_names:
+                source = f.embedding_source
+            else:
+                source = f.name.replace("_embedding", "").rstrip("_") or "content"
+                if source not in chunk_field_names:
+                    source = "content"
             vec_fields.append((f.name, source))
 
     # 第一遍：构建非向量字段
