@@ -24,30 +24,39 @@ rag_project/
 ## Quick Start
 
 ### 1. 环境配置
-编辑 .env，填入 Milvus、Embedding 模型、LLM API 等配置
+   - 编辑 .env，填入 Milvus、Embedding 模型、LLM API 等配置
+   - GPU 用户请根据cuda版本（nvidia-smi）卸载torch后改用: 
+   - pip install torch --find-links https://mirrors.aliyun.com/pytorch-wheels/cu130
+   - 昇腾 NPU 用户请额外安装（需要查询cann版本与torch版本对应表）: torch_npu==2.5.1
 
 ### 2. 后端启动
 
 ```bash
-# 安装 Python 依赖
-pip install -r ./requirements.txt
-
-# 启动 API 服务（默认 0.0.0.0:8000）
-python main.py
+pip install -r requirements.txt
 ```
 
-启动后可以访问 http://localhost:8000/docs 查看 API 文档。
+**后端服务启动，以9100端口为例：**
+
+| 环境 | 命令 |
+|------|------|
+| Linux / Mac | `API_PORT=9100 python main.py` |
+| Windows PowerShell | `$env:API_PORT=9100; python main.py` |
 
 ### 3. 前端启动
-（前后端分别运行，Vite 代理 API 请求到后端）：
 
 ```bash
 cd web
-npm install        # 首次安装依赖
-npm run dev        # 启动开发服务器 → http://localhost:3000
+npm install
 ```
 
-## Modules
+**前端服务启动以9200端口为例，后端以9100为例：**
+
+| 环境 | 命令 |
+|------|------|
+| Linux / Mac | `PORT=9200 API_PORT=9100 npm run dev` |
+| Windows PowerShell | `$env:PORT=9200; $env:API_PORT=9100; npm run dev` |
+
+## 模块
 
 1. **data_pipeline**: 数据加载、清洗、分割、向量化流水线
    - 当前问题：
