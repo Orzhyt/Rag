@@ -4,7 +4,7 @@ import type { ChatMessage, SourceCitation } from '../api/types';
 const STORAGE_KEY = 'rag-chat-state';
 
 function uuid(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID() === 'function') {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID()
   }
   const bytes = new Uint8Array(16);
