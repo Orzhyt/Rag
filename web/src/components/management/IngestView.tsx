@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import {
-  Form, Input, InputNumber, Button, Typography, message, Space, Card, Statistic, Select, Spin,
+  Form, Input, Button, Typography, message, Space, Card, Statistic, Select, Spin,
 } from 'antd';
 import { UploadOutlined } from '@ant-design/icons';
 import { ingestData } from '../../api/data';
@@ -53,8 +53,6 @@ export default function IngestView() {
       setResult(null);
       const resp = await ingestData({
         folder_path: values.folder_path,
-        chunk_size: values.chunk_size,
-        chunk_overlap: values.chunk_overlap,
         collection_name: values.collection_name || undefined,
         database: selectedDatabase,
       });
@@ -72,10 +70,7 @@ export default function IngestView() {
       <Title level={4}>数据入库</Title>
 
       <Card>
-        <Form form={form} layout="vertical" initialValues={{
-          chunk_size: 500,
-          chunk_overlap: 50,
-        }}>
+        <Form form={form} layout="vertical">
           <Space style={{ width: '100%' }} size={16}>
             <Form.Item label="数据库" style={{ width: 200 }}>
               <Select
@@ -108,15 +103,6 @@ export default function IngestView() {
           >
             <Input placeholder="例如: /data/documents" />
           </Form.Item>
-
-          <Space style={{ width: '100%' }} size={16}>
-            <Form.Item name="chunk_size" label="分块大小" style={{ width: 200 }}>
-              <InputNumber min={100} max={2000} />
-            </Form.Item>
-            <Form.Item name="chunk_overlap" label="分块重叠" style={{ width: 200 }}>
-              <InputNumber min={0} max={500} />
-            </Form.Item>
-          </Space>
 
           <Form.Item>
             <Button

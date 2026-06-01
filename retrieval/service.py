@@ -199,32 +199,19 @@ class MilvusService:
         reqs = []
         weights = []
 
-        # 向量字段: None=从 profile 默认, []=不使用, list=显式指定
+        # 向量字段: []=不使用, list=显式指定（field 为源字段名，自动加 _embedding 后缀）
         if anns_fields is not None:
             for item in anns_fields:
                 reqs.append(AnnSearchRequest(
                     data=[query_vec],
-                    anns_field=item["field"],
+                    anns_field=f"{item['field']}_embedding",
                     param={"metric_type": "COSINE", "params": {"nprobe": 16}},
                     limit=top_k,
                     expr=filter_expr,
                 ))
                 weights.append(item["weight"])
-        else:
-            vec_fields = [f for f in self.profile.fields if f.dtype == "FLOAT_VECTOR"]
-            if vec_fields:
-                per_vec_weight = 0.7 / len(vec_fields)
-                for vf in vec_fields:
-                    reqs.append(AnnSearchRequest(
-                        data=[query_vec],
-                        anns_field=vf.name,
-                        param={"metric_type": "COSINE", "params": {"nprobe": 16}},
-                        limit=top_k,
-                        expr=filter_expr,
-                    ))
-                    weights.append(per_vec_weight)
 
-        # BM25 字段: None=从 profile 默认, []=不使用, list=显式指定
+        # BM25 字段: []=不使用, list=显式指定（field 为源字段名，自动加 _sparse 后缀）
         if bm25_fields is not None:
             for item in bm25_fields:
                 sparse_req = AnnSearchRequest(
@@ -236,20 +223,6 @@ class MilvusService:
                 )
                 reqs.append(sparse_req)
                 weights.append(item["weight"])
-        else:
-            bm25_field_list = self.profile.bm25_fields
-            if bm25_field_list:
-                per_bm25_weight = 0.3 / len(bm25_field_list)
-                for bm25_f in bm25_field_list:
-                    sparse_req = AnnSearchRequest(
-                        data=[query],
-                        anns_field=f"{bm25_f.name}_sparse",
-                        param={"metric_type": "BM25"},
-                        limit=top_k,
-                        expr=filter_expr,
-                    )
-                    reqs.append(sparse_req)
-                    weights.append(per_bm25_weight)
 
         if reranker == "rrf":
             ranker = RRFRanker(k=rrf_k)

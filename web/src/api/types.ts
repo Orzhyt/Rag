@@ -57,8 +57,6 @@ export interface DescribeCollectionResponse {
 
 export interface IngestRequest {
   folder_path: string;
-  chunk_size?: number;
-  chunk_overlap?: number;
   upsert_mode?: boolean;
   collection_name?: string;
   database?: string;
@@ -72,21 +70,12 @@ export interface IngestResponse {
 
 // ─── Search ───
 
-export interface FieldWeight {
-  field: string;
-  weight: number;
-}
-
 export interface SearchRequest {
   query: string;
-  top_k?: number;
   filter_expr?: string;
   output_fields?: string[];
   collection_names?: string[];
   database?: string;
-  anns_fields?: FieldWeight[];
-  bm25_fields?: FieldWeight[];
-  reranker?: 'weighted' | 'rrf';
 }
 
 export interface SearchHit {
@@ -113,7 +102,6 @@ export interface SourceCitation {
 export interface ChatRequest {
   query: string;
   conversation_id?: string;
-  top_k?: number;
   collection_names?: string[];
   database?: string;
 }

@@ -6,6 +6,7 @@ from typing import AsyncIterator, Dict, List, Optional
 
 from llm.client import LLMClient
 from llm.prompts import RAG_SYSTEM_PROMPT, RAG_SYSTEM_PROMPT_NO_CONTEXT
+from api.schemas import HybridSearchRequest, AnnsFieldWeight, BM25FieldWeight
 from retrieval.service import MilvusService, SearchResult
 from common.logger import setup_logger
 
@@ -57,18 +58,24 @@ class RAGChatService:
         top_k: int = 5,
         collection_names: Optional[List[str]] = None,
     ) -> List[SearchResult]:
+        req = HybridSearchRequest(query=query, top_k=top_k, collection_names=collection_names)
+        anns_fields = [{"field": af.field, "weight": af.weight} for af in req.anns_fields]
+        bm25_fields = [{"field": bf.field, "weight": bf.weight} for bf in req.bm25_fields]
         try:
             return self.retriever.hybrid_search(
-                query=query,
-                top_k=top_k,
-                collection_names=collection_names,
+                query=req.query,
+                top_k=req.top_k,
+                collection_names=req.collection_names,
+                anns_fields=anns_fields,
+                bm25_fields=bm25_fields,
             )
         except Exception as e:
             logger.warning("Hybrid search failed, falling back to vector-only search: %s", e)
             return self.retriever.hybrid_search(
-                query=query,
-                top_k=top_k,
-                collection_names=collection_names,
+                query=req.query,
+                top_k=req.top_k,
+                collection_names=req.collection_names,
+                anns_fields=anns_fields,
                 bm25_fields=[],
             )
 

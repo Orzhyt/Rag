@@ -85,7 +85,7 @@ export default function ChatView() {
   }, [activeConv?.messages, streamingContent]);
 
   const handleSend = useCallback(
-    (query: string, topK: number) => {
+    (query: string) => {
       const isNewConv = !activeConversationId;
       let convId = activeConversationId;
       if (!convId) {
@@ -99,7 +99,6 @@ export default function ChatView() {
         {
           query,
           conversation_id: isNewConv ? undefined : convId,
-          top_k: topK,
           database: selectedDatabase ?? undefined,
           collection_names: selectedCollections.length > 0 ? selectedCollections : undefined,
         },

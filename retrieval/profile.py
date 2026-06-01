@@ -52,6 +52,7 @@ class FieldSpec(BaseModel):
     enable_analyzer: Optional[bool] = None
     enable_match: Optional[bool] = None
     enable_bm25: bool = False
+    enable_embedding: bool = False
     in_output: bool = True
     element_type: Optional[str] = None
     max_capacity: Optional[int] = None
@@ -82,6 +83,11 @@ class CollectionProfile:
         """所有 enable_bm25=True 的 VARCHAR 字段。"""
         return [f for f in self.fields if f.dtype == "VARCHAR" and f.enable_bm25]
 
+    @property
+    def embedding_fields(self) -> List[FieldSpec]:
+        """所有 enable_embedding=True 的 VARCHAR 字段。"""
+        return [f for f in self.fields if f.dtype == "VARCHAR" and f.enable_embedding]
+
     def get_field(self, name: str) -> Optional[FieldSpec]:
         return next((f for f in self.fields if f.name == name), None)
 
@@ -95,15 +101,15 @@ class CollectionProfile:
 
 # ============================================================================
 # 默认 RAG Profile，建表语句
-# 新增向量字段使用“title_embedding → 去掉 _embedding → "title"规则”
-# 新增bm25字段开启enable_bm25=True
+# 新增bm25字段开启enable_bm25=True，自动生成 X_sparse
+# 新增embedding字段开启enable_embedding=True，自动生成 X_embedding
 # ============================================================================
 
 DEFAULT_RAG_PROFILE = CollectionProfile(
     name="rag_chunks",
     fields=[
         FieldSpec(name="chunk_id",    dtype="VARCHAR",       is_primary=True, max_length=256,  in_output=True),
-        FieldSpec(name="content",     dtype="VARCHAR",       max_length=16384,enable_bm25=True,in_output=True),
+        FieldSpec(name="content",     dtype="VARCHAR",       max_length=16384,enable_bm25=True,enable_embedding=True,in_output=True),
         FieldSpec(name="source_file", dtype="VARCHAR",       max_length=512,  in_output=True),
         FieldSpec(name="file_name",   dtype="VARCHAR",       max_length=256,  in_output=True),
         FieldSpec(name="file_type",   dtype="VARCHAR",       max_length=50,   in_output=True),
@@ -116,7 +122,6 @@ DEFAULT_RAG_PROFILE = CollectionProfile(
         FieldSpec(name="created_at",  dtype="VARCHAR",       max_length=64,   in_output=False),
         FieldSpec(name="modified_at", dtype="VARCHAR",       max_length=64,   in_output=False),
         FieldSpec(name="metadata",    dtype="JSON",          in_output=True),
-        FieldSpec(name="content_embedding", dtype="FLOAT_VECTOR", in_output=False),
     ],
 )
 
@@ -200,14 +205,18 @@ def build_insert_rows(
     """将 ParsedChunk 列表转为可插入 Milvus 的行列表。
 
     向量字段会自动从对应的源文本字段编码生成。
-    约定: field name 与 ParsedChunk 属性名一致，向量字段去掉 "_embedding" 后缀即源字段。
+    约定: 源字段 X 开启 enable_embedding=True 后，自动生成 X_embedding 向量字段。
     """
     # 收集向量字段信息: (field_name, source_field_name)
     chunk_field_names = {f.name for f in dc_fields(ParsedChunk)}
     vec_fields: List[tuple] = []
     for f in profile.fields:
-        if f.dtype == "FLOAT_VECTOR":
-            # 优先使用显式指定的 embedding_source，否则按命名约定推导
+        if f.dtype == "VARCHAR" and f.enable_embedding:
+            vec_name = f"{f.name}_embedding"
+            source = f.name
+            vec_fields.append((vec_name, source))
+        elif f.dtype == "FLOAT_VECTOR":
+            # 兼容手动声明的 FLOAT_VECTOR 字段
             if f.embedding_source and f.embedding_source in chunk_field_names:
                 source = f.embedding_source
             else:

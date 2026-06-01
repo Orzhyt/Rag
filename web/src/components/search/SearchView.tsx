@@ -1,17 +1,16 @@
 import { useState, useEffect } from 'react';
-import { Input, Button, Space, Typography, Spin, Empty, Select, Slider, message, InputNumber } from 'antd';
-import { SearchOutlined, PlusOutlined, MinusCircleOutlined } from '@ant-design/icons';
+import { Input, Button, Space, Typography, Spin, Empty, Select, message } from 'antd';
+import { SearchOutlined } from '@ant-design/icons';
 import SearchResultCard from './SearchResultCard';
 import { hybridSearch } from '../../api/search';
 import { listDatabases } from '../../api/databases';
 import { listCollections } from '../../api/collections';
-import type { SearchHit, FieldWeight } from '../../api/types';
+import type { SearchHit } from '../../api/types';
 
 const { Title, Text } = Typography;
 
 export default function SearchView() {
   const [query, setQuery] = useState('');
-  const [topK, setTopK] = useState(5);
   const [results, setResults] = useState<SearchHit[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -22,10 +21,6 @@ export default function SearchView() {
   const [selectedCollections, setSelectedCollections] = useState<string[]>([]);
   const [dbLoading, setDbLoading] = useState(false);
   const [colLoading, setColLoading] = useState(false);
-
-  // Weight configs
-  const [annsFields, setAnnsFields] = useState<FieldWeight[]>([{ field: 'content_embedding', weight: 1 }]);
-  const [bm25Fields, setBm25Fields] = useState<FieldWeight[]>([]);
 
   useEffect(() => {
     setDbLoading(true);
@@ -53,11 +48,8 @@ export default function SearchView() {
     try {
       const req = {
         query: query.trim(),
-        top_k: topK,
         collection_names: selectedCollections.length ? selectedCollections : undefined,
         database: selectedDatabase,
-        anns_fields: annsFields.filter((f) => f.field.trim() && f.weight > 0),
-        bm25_fields: bm25Fields.filter((f) => f.field.trim() && f.weight > 0),
       };
       const resp = await hybridSearch(req);
       setResults(resp.results);
@@ -108,74 +100,7 @@ export default function SearchView() {
             size="small"
             loading={colLoading}
           />
-
-          <Text style={{ fontSize: 13, color: '#666' }}>topK</Text>
-          <InputNumber min={1} max={30} value={topK} onChange={(v) => v && setTopK(v)} size="small" style={{ width: 60 }} />
         </Space>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <Text style={{ fontSize: 13, color: '#666', whiteSpace: 'nowrap' }}>向量字段</Text>
-          {annsFields.map((f, i) => (
-            <Space key={i} size={4}>
-              <Input
-                value={f.field}
-                onChange={(e) => { const next = [...annsFields]; next[i] = { ...next[i], field: e.target.value }; setAnnsFields(next); }}
-                size="small"
-                style={{ width: 150 }}
-              />
-              <InputNumber
-                value={f.weight}
-                onChange={(v) => { if (v != null) { const next = [...annsFields]; next[i] = { ...next[i], weight: v }; setAnnsFields(next); } }}
-                min={0} max={1} step={0.1}
-                size="small"
-                style={{ width: 60 }}
-              />
-              {annsFields.length > 1 && (
-                <MinusCircleOutlined
-                  style={{ color: '#999', cursor: 'pointer' }}
-                  onClick={() => setAnnsFields(annsFields.filter((_, j) => j !== i))}
-                />
-              )}
-            </Space>
-          ))}
-          <Button
-            size="small"
-            type="dashed"
-            icon={<PlusOutlined />}
-            onClick={() => setAnnsFields([...annsFields, { field: '', weight: 0.5 }])}
-          />
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <Text style={{ fontSize: 13, color: '#666', whiteSpace: 'nowrap' }}>BM25字段</Text>
-          {bm25Fields.map((f, i) => (
-            <Space key={i} size={4}>
-              <Input
-                value={f.field}
-                onChange={(e) => { const next = [...bm25Fields]; next[i] = { ...next[i], field: e.target.value }; setBm25Fields(next); }}
-                size="small"
-                style={{ width: 100 }}
-              />
-              <InputNumber
-                value={f.weight}
-                onChange={(v) => { if (v != null) { const next = [...bm25Fields]; next[i] = { ...next[i], weight: v }; setBm25Fields(next); } }}
-                min={0} max={1} step={0.1}
-                size="small"
-                style={{ width: 60 }}
-              />
-              <MinusCircleOutlined
-                style={{ color: '#999', cursor: 'pointer' }}
-                onClick={() => setBm25Fields(bm25Fields.filter((_, j) => j !== i))}
-              />
-            </Space>
-          ))}
-          <Button
-            size="small"
-            type="dashed"
-            icon={<PlusOutlined />}
-            onClick={() => setBm25Fields([...bm25Fields, { field: '', weight: 0.3 }])}
-          />
-        </div>
       </Space>
 
       {/* Results with scroll */}

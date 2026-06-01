@@ -131,15 +131,21 @@ class BM25FieldWeight(BaseModel):
 
 class HybridSearchRequest(BaseModel):
     query: str
-    top_k: int = Field(10, gt=0)
+    top_k: int = Field(5, gt=0, description="检索返回的文档数量")
     filter_expr: Optional[str] = None
     reranker: str = Field("weighted", pattern=r"^(weighted|rrf)$")
     rrf_k: int = Field(60, gt=0)
     output_fields: Optional[List[str]] = None
     collection_names: Optional[List[str]] = Field(None, description="要检索的集合列表，不提供则使用默认集合")
     database: Optional[str] = Field(None, description="指定 Milvus 数据库，不提供则使用当前数据库")
-    anns_fields: Optional[List[AnnsFieldWeight]] = Field(None, description="向量字段检索配置，每项指定字段名和权重；不提供则使用 profile 中所有 FLOAT_VECTOR 字段均分权重")
-    bm25_fields: Optional[List[BM25FieldWeight]] = Field(None, description="BM25字段检索配置，每项指定字段名和权重；不提供则使用 profile 中所有 enable_bm25 字段均分权重")
+    anns_fields: Optional[List[AnnsFieldWeight]] = Field(
+        default_factory=lambda: [AnnsFieldWeight(field="content", weight=1)],
+        description="向量字段检索配置，默认使用 content（自动推导为 content_embedding）",
+    )
+    bm25_fields: Optional[List[BM25FieldWeight]] = Field(
+        default_factory=lambda: [BM25FieldWeight(field="content", weight=0)],
+        description="BM25字段检索配置，默认使用 content（自动推导为 content_sparse）",
+    )
 
 
 class QueryRequest(BaseModel):
@@ -232,7 +238,7 @@ class SourceCitation(BaseModel):
 class ChatRequest(BaseModel):
     query: str = Field(..., min_length=1, description="用户问题")
     conversation_id: Optional[str] = Field(None, description="对话ID，不提供则创建新对话")
-    top_k: int = Field(5, gt=0, description="检索返回的文档数量")
+    top_k: int = Field(5, gt=0, description="检索返回的文档数量，默认5")
     collection_names: Optional[List[str]] = Field(None, description="检索的集合列表")
     database: Optional[str] = Field(None, description="指定 Milvus 数据库，不提供则使用当前数据库")
 

@@ -219,6 +219,16 @@ class MilvusClient:
         # FieldSpec → FieldSchema
         field_list = [to_field_schema(f, dim=dim) for f in field_specs]
 
+        # Embedding 处理：从 FieldSpec 的 enable_embedding 自动推导
+        embedding_fields = []  # 收集生成的 embedding 字段名
+        for fspec in field_specs:
+            if fspec.dtype == "VARCHAR" and fspec.enable_embedding:
+                emb_name = f"{fspec.name}_embedding"
+                field_list.append(
+                    FieldSchema(name=emb_name, dtype=DataType.FLOAT_VECTOR, dim=dim)
+                )
+                embedding_fields.append(emb_name)
+
         # BM25 处理：从 FieldSpec 的 enable_bm25 自动推导
         functions = []
         bm25_sparse_fields = []  # 收集 (sparse_field_name, text_field_name)
