@@ -35,16 +35,23 @@ class RAGPipeline:
         mode: str = "hybrid",
         collection_names: Optional[List[str]] = None,
     ) -> List[str]:
-        """检索相关文档片段，返回 content 列表"""
-        if mode == "vector":
-            results = self.retriever.hybrid_search(
-                query, top_k=top_k, collection_names=collection_names,
-                bm25_fields=[],  # 不使用 BM25，纯向量检索
-            )
+        """检索相关文档片段，返回 content 列表
+
+        mode="hybrid" 时启用 ANN + BM25 混合检索（BM25 权重 0.5）；
+        mode="vector" 时仅使用 ANN 向量检索。
+        """
+        anns_fields = [{"field": "content", "weight": 1.0}]
+        if mode == "hybrid":
+            bm25_fields = [{"field": "content", "weight": 0.5}]
         else:
-            results = self.retriever.hybrid_search(
-                query, top_k=top_k, collection_names=collection_names,
-            )
+            bm25_fields = []
+        results = self.retriever.hybrid_search(
+            query=query,
+            top_k=top_k,
+            collection_names=collection_names,
+            anns_fields=anns_fields,
+            bm25_fields=bm25_fields,
+        )
         return [r.content for r in results]
 
     def generate(self, query: str, contexts: List[str]) -> str:

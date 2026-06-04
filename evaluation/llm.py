@@ -27,6 +27,20 @@ class LocalEmbedding(BaseRagasEmbedding):
     async def aembed_texts(self, texts: List[str], **kwargs) -> List[List[float]]:
         return self.embed_texts(texts)
 
+    # ragas AnswerRelevancy 内部调用 embed_query() / embed_documents()，
+    # 语义分别与 embed_text / embed_texts 相同
+    def embed_query(self, text: str, **kwargs) -> List[float]:
+        return self.embed_text(text, **kwargs)
+
+    async def aembed_query(self, text: str, **kwargs) -> List[float]:
+        return self.embed_text(text, **kwargs)
+
+    def embed_documents(self, texts: List[str], **kwargs) -> List[List[float]]:
+        return self.embed_texts(texts, **kwargs)
+
+    async def aembed_documents(self, texts: List[str], **kwargs) -> List[List[float]]:
+        return self.embed_texts(texts, **kwargs)
+
 
 def get_ragas_llm():
     """构建 ragas 评估用的 LLM（华为云 MaaS，使用 JUDGE_MODEL）"""

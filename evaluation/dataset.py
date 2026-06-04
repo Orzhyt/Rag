@@ -1,10 +1,11 @@
 import json
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from ragas.dataset_schema import EvaluationDataset, SingleTurnSample
 
+from evaluation.compare import aggregate_by_target
 from evaluation.rag_pipeline import RAGPipeline
 
 logger = logging.getLogger("evaluation.dataset")
@@ -30,13 +31,16 @@ def build_eval_dataset(
     top_k: int = 5,
     mode: str = "hybrid",
     collection_names: Optional[List[str]] = None,
-) -> EvaluationDataset:
+) -> tuple:
     """对每条测试数据执行 RAG 流程，构建 ragas EvaluationDataset
 
     records 中的 user_input 会通过 pipeline.invoke() 获取 response 和 retrieved_contexts。
     reference 和 reference_contexts 从 records 中直接取。
+
+    返回 (EvaluationDataset, debug_info_list)，debug_info_list 包含每条的 response 和 retrieved_contexts。
     """
     samples = []
+    debug_info = []
     for i, rec in enumerate(records):
         query = rec["user_input"]
         logger.info("Query %d/%d: %s", i + 1, len(records), query[:50])
@@ -53,11 +57,21 @@ def build_eval_dataset(
             reference_contexts=rec.get("reference_contexts"),
         )
         samples.append(sample)
+        debug_info.append({
+            "response": answer,
+            "retrieved_contexts": contexts,
+        })
 
-    return EvaluationDataset(samples=samples)
+    return EvaluationDataset(samples=samples), debug_info
 
 
-def save_results(results: List[Dict], metrics: List[str], output_dir: str, experiment_name: str) -> str:
+def save_results(
+    results: List[Dict],
+    metrics: List[str],
+    output_dir: str,
+    experiment_name: str,
+    debug_info: Optional[List[Dict]] = None,
+) -> str:
     """保存评估结果到 JSON 文件，汇总分数在前，逐条分数在后"""
     summary = {}
     for metric_name in metrics:
@@ -67,9 +81,18 @@ def save_results(results: List[Dict], metrics: List[str], output_dir: str, exper
         else:
             summary[metric_name] = None
 
+    # 合并 debug_info（response + retrieved_contexts）到 samples
+    samples = results
+    if debug_info:
+        samples = []
+        for r, d in zip(results, debug_info):
+            merged = {**r, "response": d.get("response", ""), "retrieved_contexts": d.get("retrieved_contexts", [])}
+            samples.append(merged)
+
     output = {
         "summary": summary,
-        "samples": results,
+        "group_summary": aggregate_by_target(samples),
+        "samples": samples,
     }
 
     out_path = Path(output_dir)
