@@ -3,6 +3,7 @@ from typing import List, Optional, Tuple
 
 from openai import OpenAI
 
+from api.schemas import HybridSearchRequest
 from retrieval.service import MilvusService
 
 
@@ -37,18 +38,21 @@ class RAGPipeline:
     ) -> List[str]:
         """检索相关文档片段，返回 content 列表
 
-        mode="hybrid" 时启用 ANN + BM25 混合检索（BM25 权重 0.5）；
+        mode="hybrid" 时启用 ANN + BM25 混合检索；
         mode="vector" 时仅使用 ANN 向量检索。
         """
-        anns_fields = [{"field": "content", "weight": 1.0}]
-        if mode == "hybrid":
-            bm25_fields = [{"field": "content", "weight": 0.5}]
-        else:
+        req = HybridSearchRequest(query=query, top_k=top_k, collection_names=collection_names)
+
+        anns_fields = [{"field": af.field, "weight": af.weight} for af in req.anns_fields]
+        bm25_fields = [{"field": bf.field, "weight": bf.weight} for bf in req.bm25_fields]
+
+        if mode == "vector":
             bm25_fields = []
+
         results = self.retriever.hybrid_search(
-            query=query,
-            top_k=top_k,
-            collection_names=collection_names,
+            query=req.query,
+            top_k=req.top_k,
+            collection_names=req.collection_names,
             anns_fields=anns_fields,
             bm25_fields=bm25_fields,
         )
