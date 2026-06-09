@@ -2,13 +2,13 @@
 
 用法:
     # 运行评估
-    python -m evaluation.runner --mode evaluate --dataset evaluation/test_dataset_optimized.jsonl
+    python -m evaluation.runner evaluate --dataset evaluation/test_dataset_optimized.jsonl
 
     # 指定指标和检索参数
-    python -m evaluation.runner --mode evaluate --dataset evaluation/test_dataset.jsonl --top-k 5 --search-mode hybrid
+    python -m evaluation.runner evaluate --dataset evaluation/test_dataset.jsonl --top-k 5
 
     # 前后对比
-    python -m evaluation.runner --mode compare evaluation/results/before.json evaluation/results/after.json
+    python -m evaluation.runner compare evaluation/results/before.json evaluation/results/after.json
 """
 
 import argparse
@@ -23,8 +23,8 @@ from common.logger import setup_logger
 from evaluation.compare import aggregate_by_target, compare_results, print_aggregation, print_comparison
 from evaluation.dataset import build_eval_dataset, load_dataset, save_results
 from evaluation.llm import get_ragas_embeddings, get_ragas_llm
-from evaluation.rag_pipeline import RAGPipeline
-from evaluation.retrieval_metrics import compute_retrieval_metrics_batch
+from llm.client import LLMClient
+from llm.service import RAGChatService
 from milvus.client import MilvusClient
 from retrieval.embedder import Embedder
 from retrieval.profile import DEFAULT_RAG_PROFILE
@@ -41,18 +41,15 @@ _RAGAS_METRIC_MAP = {
     "context_recall": lambda: __import__("ragas.metrics", fromlist=["ContextRecall"]).ContextRecall(),
 }
 
-# 确定性检索指标名
-_RETRIEVAL_METRIC_NAMES = {"hit_rate", "mrr", "recall"}
-
 # 默认全部指标
-DEFAULT_METRICS = list(_RAGAS_METRIC_MAP.keys()) + list(_RETRIEVAL_METRIC_NAMES)
+DEFAULT_METRICS = list(_RAGAS_METRIC_MAP.keys())
 
 
 def init_services(
     database: Optional[str] = None,
     collection_name: Optional[str] = None,
 ) -> tuple:
-    """初始化评估所需的服务，返回 (MilvusService, EmbeddingModel)"""
+    """初始化评估所需的服务，返回 (RAGChatService, EmbeddingModel)"""
     embedder = Embedder()
     _ = embedder.dim  # 触发模型加载
 
@@ -63,18 +60,19 @@ def init_services(
     if os.getenv("MAAS_RERANK_ENABLED", "false").lower() in ("true", "1", "yes"):
         reranker = Reranker()
 
-    service = MilvusService(
+    milvus_service = MilvusService(
         client=client, embedder=embedder, profile=DEFAULT_RAG_PROFILE,
         reranker=reranker,
     )
-    return service, embedder
+
+    llm_client = LLMClient()
+    rag_chat_service = RAGChatService(llm_client=llm_client, milvus_service=milvus_service)
+
+    return rag_chat_service, embedder
 
 
 def get_metrics(names: List[str], ragas_llm=None, ragas_embeddings=None) -> List:
-    """构建 ragas 指标对象列表，并设置 llm/embeddings。
-
-    仅处理 _RAGAS_METRIC_MAP 中的指标；检索指标在 run_evaluation 中单独计算。
-    """
+    """构建 ragas 指标对象列表，并设置 llm/embeddings。"""
     metrics = []
     for name in names:
         if name not in _RAGAS_METRIC_MAP:
@@ -92,23 +90,19 @@ def run_evaluation(
     dataset_path: str,
     metrics: Optional[List[str]] = None,
     top_k: int = 5,
-    search_mode: str = "hybrid",
     output_dir: str = "evaluation/results",
     collection_names: Optional[List[str]] = None,
     database: Optional[str] = None,
-    similarity_threshold: float = 0.7,
 ) -> str:
-    """执行完整评估：ragas LLM-judge 指标 + 确定性检索指标。
+    """执行完整评估：ragas LLM-judge 指标。
 
     Args:
         dataset_path: 测试数据集 JSONL 路径
         metrics: 指标名列表，None 使用默认全部指标
         top_k: 检索返回的文档数
-        search_mode: 检索模式 ("hybrid" / "vector")
         output_dir: 结果输出目录
         collection_names: 检索的 Milvus 集合名列表
         database: Milvus 数据库名，None 使用环境变量或默认
-        similarity_threshold: 检索指标命中阈值
 
     Returns:
         结果文件路径
@@ -116,24 +110,22 @@ def run_evaluation(
     if metrics is None:
         metrics = DEFAULT_METRICS
 
-    # 分离 ragas 指标和检索指标
+    # 过滤有效的 ragas 指标
     ragas_metric_names = [m for m in metrics if m in _RAGAS_METRIC_MAP]
-    retrieval_metric_names = [m for m in metrics if m in _RETRIEVAL_METRIC_NAMES]
 
     # 1. 初始化服务
     logger.info("初始化服务 (database=%s)...", database or "default")
-    milvus_service, embedder = init_services(database=database)
+    rag_chat_service, embedder = init_services(database=database)
 
     # 2. 加载测试数据集
     logger.info("加载测试数据集: %s", dataset_path)
     records = load_dataset(dataset_path)
     logger.info("共 %d 条测试样本", len(records))
 
-    # 3. 构建 RAG pipeline 并执行检索+生成
-    pipeline = RAGPipeline(milvus_service)
-    logger.info("执行 RAG 流程 (top_k=%d, mode=%s)...", top_k, search_mode)
+    # 3. 通过接口侧执行 RAG 流程
+    logger.info("执行 RAG 流程 (top_k=%d)...", top_k)
     eval_dataset, debug_info = build_eval_dataset(
-        records, pipeline, top_k=top_k, mode=search_mode,
+        records, rag_chat_service, top_k=top_k,
         collection_names=collection_names,
     )
 
@@ -163,49 +155,27 @@ def run_evaluation(
     else:
         logger.info("跳过 ragas 指标（未指定）")
 
-    # 5. 计算确定性检索指标
-    if retrieval_metric_names:
-        logger.info("计算检索指标: %s (threshold=%.2f)", retrieval_metric_names, similarity_threshold)
-        samples_with_contexts = []
-        for i, rec in enumerate(records):
-            retrieved = debug_info[i].get("retrieved_contexts", [])
-            reference = rec.get("reference_contexts", [])
-            samples_with_contexts.append({
-                "retrieved_contexts": retrieved,
-                "reference_contexts": reference,
-            })
-
-        retrieval_scores = compute_retrieval_metrics_batch(
-            embedder, samples_with_contexts, threshold=similarity_threshold,
-        )
-        for i, rscores in enumerate(retrieval_scores):
-            all_results[i].update(rscores)
-
-        logger.info("检索指标计算完成")
-    else:
-        logger.info("跳过检索指标（未指定）")
-
-    # 6. 合并元数据（从原始 records 中保留 optimization_target 等）
-    _metadata_keys = ["optimization_target", "difficulty", "optimization_note", "source"]
+    # 5. 合并元数据（从原始 records 中保留 optimization_target 等）
+    _metadata_keys = ["optimization_target", "optimization_note", "source"]
     for i, rec in enumerate(records):
         all_results[i]["user_input"] = rec.get("user_input", "")
         for mk in _metadata_keys:
             if mk in rec:
                 all_results[i][mk] = rec[mk]
 
-    # 7. 保存结果
+    # 6. 保存结果
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     dataset_stem = Path(dataset_path).stem
     experiment_name = f"eval_{dataset_stem}_{timestamp}"
 
-    all_metric_names = ragas_metric_names + retrieval_metric_names
+    all_metric_names = ragas_metric_names
     result_path = save_results(
         all_results, all_metric_names, output_dir, experiment_name,
         debug_info=debug_info,
     )
     logger.info("结果已保存到: %s", result_path)
 
-    # 8. 打印摘要
+    # 7. 打印摘要
     _print_summary(all_results, all_metric_names)
 
     return result_path
@@ -246,18 +216,9 @@ def main():
         help=f"指标列表（逗号分隔），默认: {','.join(DEFAULT_METRICS)}",
     )
     eval_parser.add_argument("--top-k", type=int, default=5, help="检索返回文档数 (默认 5)")
-    eval_parser.add_argument(
-        "--search-mode", default="hybrid", choices=["hybrid", "vector"],
-        help="检索模式 (默认 hybrid)",
-    )
     eval_parser.add_argument("--output-dir", default="evaluation/results", help="结果输出目录")
     eval_parser.add_argument("--database", default=None, help="Milvus 数据库名 (默认使用环境变量)")
     eval_parser.add_argument("--collections", nargs="+", default=None, help="Milvus 集合名列表")
-    eval_parser.add_argument(
-        "--similarity-threshold", type=float, default=0.7,
-        help="检索指标命中阈值 (默认 0.7)",
-    )
-
     # compare 子命令
     cmp_parser = subparsers.add_parser("compare", help="前后对比")
     cmp_parser.add_argument("before", help="优化前评估结果 JSON 路径")
@@ -271,11 +232,9 @@ def main():
             dataset_path=args.dataset,
             metrics=metrics,
             top_k=args.top_k,
-            search_mode=args.search_mode,
             output_dir=args.output_dir,
             collection_names=args.collections,
             database=args.database,
-            similarity_threshold=args.similarity_threshold,
         )
     elif args.mode == "compare":
         comparison = compare_results(args.before, args.after)

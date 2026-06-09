@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Optional
 # 已知的元数据字段，不参与指标聚合
 _METADATA_KEYS = frozenset({
     "user_input", "response", "retrieved_contexts", "reference",
-    "reference_contexts", "optimization_target", "difficulty",
+    "reference_contexts", "optimization_target",
     "optimization_note", "source", "persona_name", "query_style",
     "query_length", "synthesizer_name",
 })

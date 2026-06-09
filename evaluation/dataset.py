@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 from pathlib import Path
@@ -6,7 +7,7 @@ from typing import Any, Dict, List, Optional
 from ragas.dataset_schema import EvaluationDataset, SingleTurnSample
 
 from evaluation.compare import aggregate_by_target
-from evaluation.rag_pipeline import RAGPipeline
+from llm.service import RAGChatService
 
 logger = logging.getLogger("evaluation.dataset")
 
@@ -27,15 +28,14 @@ def load_dataset(path: str) -> List[Dict]:
 
 def build_eval_dataset(
     records: List[Dict],
-    pipeline: RAGPipeline,
+    rag_chat_service: RAGChatService,
     top_k: int = 5,
-    mode: str = "hybrid",
     collection_names: Optional[List[str]] = None,
 ) -> tuple:
     """对每条测试数据执行 RAG 流程，构建 ragas EvaluationDataset
 
-    records 中的 user_input 会通过 pipeline.invoke() 获取 response 和 retrieved_contexts。
-    reference 和 reference_contexts 从 records 中直接取。
+    通过 rag_chat_service.chat() 调用接口侧，获取和页面一致的检索结果与生成回答。
+    完整 chunk 内容从 source["fields"]["content"] 提取（非截断版本）。
 
     返回 (EvaluationDataset, debug_info_list)，debug_info_list 包含每条的 response 和 retrieved_contexts。
     """
@@ -44,9 +44,22 @@ def build_eval_dataset(
     for i, rec in enumerate(records):
         query = rec["user_input"]
         logger.info("Query %d/%d: %s", i + 1, len(records), query[:50])
-        answer, contexts = pipeline.invoke(
-            query, top_k=top_k, mode=mode, collection_names=collection_names,
+
+        result = asyncio.run(
+            rag_chat_service.chat(
+                query=query,
+                top_k=top_k,
+                collection_names=collection_names,
+            )
         )
+
+        answer = result["answer"]
+        # 从 fields 中提取完整内容，fallback 到截断的 content
+        contexts = [
+            s.get("fields", {}).get("content", s.get("content", ""))
+            for s in result.get("sources", [])
+        ]
+
         logger.info("Query %d/%d done (retrieved %d contexts)", i + 1, len(records), len(contexts))
 
         sample = SingleTurnSample(
