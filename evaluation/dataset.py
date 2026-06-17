@@ -6,7 +6,6 @@ from typing import Any, Dict, List, Optional
 
 from ragas.dataset_schema import EvaluationDataset, SingleTurnSample
 
-from evaluation.compare import aggregate_by_target
 from llm.service import RAGChatService
 
 logger = logging.getLogger("evaluation.dataset")
@@ -104,7 +103,6 @@ def save_results(
 
     output = {
         "summary": summary,
-        "group_summary": aggregate_by_target(samples),
         "samples": samples,
     }
 

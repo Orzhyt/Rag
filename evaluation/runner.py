@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from common.logger import setup_logger
-from evaluation.compare import aggregate_by_target, compare_results, print_aggregation, print_comparison
+from evaluation.compare import compare_results, print_comparison
 from evaluation.dataset import build_eval_dataset, load_dataset, save_results
 from evaluation.llm import get_ragas_embeddings, get_ragas_llm
 from llm.client import LLMClient
@@ -182,13 +182,11 @@ def run_evaluation(
 
 
 def _print_summary(results: List[Dict[str, Any]], metric_names: List[str]) -> None:
-    """打印评估摘要和分组报告。"""
+    """打印评估摘要。"""
     print("\n" + "=" * 60)
     print("  评估结果摘要")
     print("=" * 60)
 
-    # 总体均值
-    print("\n【总体指标】")
     for mk in metric_names:
         values = [r[mk] for r in results if r.get(mk) is not None]
         if values:
@@ -196,12 +194,6 @@ def _print_summary(results: List[Dict[str, Any]], metric_names: List[str]) -> No
             print(f"  {mk:<24} {avg:.4f}  (n={len(values)})")
         else:
             print(f"  {mk:<24} N/A")
-
-    # 分组报告
-    agg = aggregate_by_target(results, metric_keys=metric_names)
-    if len(agg) > 1:  # 有多个 target 或有 __all__
-        print("\n【按优化目标分组】")
-        print_aggregation(agg)
 
 
 def main():
