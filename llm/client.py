@@ -27,7 +27,7 @@ class LLMClient:
     async def chat_completion(
         self,
         messages: List[Dict[str, str]],
-        temperature: float = 0.7,
+        temperature: float = 0,
         max_tokens: Optional[int] = None,
     ) -> str:
         resp = await self.client.chat.completions.create(
