@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import math
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -87,7 +88,7 @@ def save_results(
     """保存评估结果到 JSON 文件，汇总分数在前，逐条分数在后"""
     summary = {}
     for metric_name in metrics:
-        values = [r[metric_name] for r in results if r.get(metric_name) is not None]
+        values = [r[metric_name] for r in results if r.get(metric_name) is not None and not math.isnan(r[metric_name])]
         if values:
             summary[metric_name] = round(sum(values) / len(values), 4)
         else:

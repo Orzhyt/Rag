@@ -13,6 +13,7 @@
 
 import argparse
 import json
+import math
 import os
 import sys
 from datetime import datetime
@@ -188,7 +189,7 @@ def _print_summary(results: List[Dict[str, Any]], metric_names: List[str]) -> No
     print("=" * 60)
 
     for mk in metric_names:
-        values = [r[mk] for r in results if r.get(mk) is not None]
+        values = [r[mk] for r in results if r.get(mk) is not None and not math.isnan(r.get(mk))]
         if values:
             avg = sum(values) / len(values)
             print(f"  {mk:<24} {avg:.4f}  (n={len(values)})")
